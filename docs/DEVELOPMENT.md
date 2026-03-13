@@ -344,3 +344,111 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 - [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
 - [Python Best Practices](https://docs.python-guide.org/)
 - [Testing with Pytest](https://docs.pytest.org/)
+
+---
+
+## Desktop Application Features (Electron + React)
+
+### Architecture
+
+The desktop app uses **Electron** (main process) + **React** (renderer) + **Python** (FFmpeg subprocess). All communication is via IPC with `contextBridge`. Core business logic is framework-agnostic using TypeScript interfaces with DI, Repository, Command, Adapter, and Strategy patterns.
+
+### Running the Desktop App
+
+```bash
+npm install
+npm run dev         # Run renderer (Vite) + main (Electron) concurrently
+npm run test        # Run vitest
+npm run build       # Production build
+```
+
+### 4-Step Wizard
+
+| Step | Name | Description |
+|------|------|-------------|
+| 0 | Auth | Google sign-in or skip |
+| 1 | Add Videos | Drag-and-drop or browse; set resolution/FPS |
+| 2 | Arrange | Sort, duplicate, drag-and-drop reorder |
+| 3 | Preview | Review all settings before merge |
+| 4 | Finalize | Choose output path, start merge, track progress |
+
+### Drag-and-Drop (Step 1)
+
+Drop video files directly onto the dropzone area. Supported formats: `MP4`, `MOV`, `AVI`, `MKV`, `WEBM`. Visual feedback (blue glow, icon change) on drag-over. Unsupported files are silently skipped with a status message.
+
+### Video Standardization (Step 1)
+
+Two dropdowns below the dropzone:
+- **Resolution**: Original, 720p, 1080p, 4K
+- **FPS**: Original, 24, 30, 60
+
+These settings are passed via `standardization` field in merge options to ensure uniform output.
+
+### FFmpeg Availability Indicator
+
+The header shows an FFmpeg status chip with a colored dot:
+- **Green dot** = Installed
+- **Red dot** = Not Installed
+
+Click the chip to open a dialog showing version, path, and whether it's bundled or from system PATH.
+
+### Arrange Screen Enhancements (Step 2)
+
+- **Sorting**: Sort by Name (ascending/descending) via toolbar
+- **Duplicate**: Click "Dup" to clone a video entry in the sequence
+- **Drag-and-drop reorder**: Drag items by the handle (⠿) to rearrange
+- **Up/Down/Remove**: Standard reorder and removal buttons
+
+### Preview Step (Step 3)
+
+Shows a summary of:
+- Ordered file list
+- Selected standardization settings
+- Auth status and YouTube availability
+
+### YouTube Upload
+
+After a successful merge, logged-in users see a YouTube upload form:
+- Title (required), Description, Privacy (private/unlisted/public)
+- Uses YouTube Data API v3 resumable upload
+- Upload result shows direct video URL
+
+### Google OAuth2
+
+- Auth prompt on first launch: "Sign in with Google" or "Continue without account"
+- Opens native OAuth popup (Electron BrowserWindow) → local HTTP redirect callback
+- Tokens stored in `electron-store`
+- When not logged in: YouTube config/upload features are disabled
+
+### Dashboard & Settings
+
+Accessible via ⚙ button in the header. Tabs:
+- **General**: Max file size, default resolution/FPS
+- **Presets**: Save/load standardization presets
+- **YouTube**: Default title, description, privacy (requires login)
+- **FFmpeg**: Status, version, path display
+- **Account**: Google account info, sign out
+
+### FFmpeg Bundling
+
+See [ffmpeg-bundling.md](./ffmpeg-bundling.md) for details on including FFmpeg binaries with the installer.
+
+### TypeScript Tests
+
+```bash
+npm test                    # Run vitest
+npx vitest run --reporter verbose  # Verbose output
+```
+
+Tests use **vitest** + **@testing-library/react** with **jsdom** environment. The setup file (`renderer/src/__tests__/setup.ts`) mocks all `window.electronAPI` methods.
+
+Test coverage:
+- Auth prompt rendering and interactions
+- Drag-and-drop file acceptance/rejection
+- Standardization dropdown defaults and changes
+- FFmpeg indicator display and dialog
+- Arrange screen sorting, duplication, reordering
+- Preview step content verification
+- YouTube auth-gated UI elements
+- Dashboard tabs and navigation
+- Wizard step validation and navigation
