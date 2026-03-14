@@ -1,6 +1,19 @@
 version: '3.8'
 
 services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./src/videomerger/static/uploads:/app/src/videomerger/static/uploads
+      - ./src/videomerger/static/outputs:/app/src/videomerger/static/outputs
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - MAX_CONTENT_LENGTH=524288000
+    restart: unless-stopped
+
   # This service provides a Node.js builder using Wine so Windows users 
   # can build the Electron executable (.exe) without installing Node.js locally.
   builder:
