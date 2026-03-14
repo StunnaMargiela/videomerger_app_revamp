@@ -215,6 +215,7 @@ yarn.lock
 
 # Electron
 dist/
+dist-bin/
 out/
 
 # TypeScript

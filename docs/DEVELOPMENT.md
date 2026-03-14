@@ -10,22 +10,32 @@
    cd videomerger_app_revamp
    ```
 
-2. **Set up Python virtual environment**
+2. **Install Node.js & npm** (required for Desktop App development)
+   - **Windows**: Download the LTS version from [nodejs.org](https://nodejs.org/) and install it.
+   - **macOS**: `brew install node`
+   - **Ubuntu/Debian**: `sudo apt-get install nodejs npm`
+   
+   *(Verify installation by running `node -v` and `npm -v` in your terminal)*
+
+3. **Set up Python virtual environment**
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. **Install development dependencies**
+4. **Install development dependencies**
    ```bash
    pip install -r requirements.txt
    pip install -e ".[dev]"
+   
+   # Also install npm dependencies:
+   npm install
    ```
 
-4. **Install FFmpeg** (for video processing)
+5. **Install FFmpeg** (for video processing)
    - **macOS**: `brew install ffmpeg`
    - **Ubuntu/Debian**: `sudo apt-get install ffmpeg`
-   - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
+   - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) or use `winget install ffmpeg`
 
 ## Project Structure
 
