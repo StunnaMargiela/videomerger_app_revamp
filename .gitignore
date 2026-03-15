@@ -225,3 +225,4 @@ out/
 *.zip
 *.7z
 resources/ffmpeg/
+resources/video_processor_cli.py

@@ -174,9 +174,30 @@ function getVideoDurationSeconds(filePath: string): Promise<number | null> {
  */
 function getAppConfig(): IAppConfig {
   const bundledPath = getBundledFFmpegPath();
+  
+  // Resolve Python script path
+  let pythonScriptPath = path.join(__dirname, '../../src/videomerger/video_processor_cli.py');
+  
+  // In packaged app, check for the script in resources or unpacked asar
+  const packagedScriptPath = path.join(process.resourcesPath || '', 'video_processor_cli.py');
+  const unpackedScriptPath = pythonScriptPath.replace('app.asar', 'app.asar.unpacked');
+  
+  if (fs.existsSync(packagedScriptPath)) {
+    pythonScriptPath = packagedScriptPath;
+    console.log('[DEBUG] Using packaged Python script:', pythonScriptPath);
+  } else if (fs.existsSync(unpackedScriptPath)) {
+    pythonScriptPath = unpackedScriptPath;
+    console.log('[DEBUG] Using unpacked ASAR Python script:', pythonScriptPath);
+  } else {
+    console.log('[DEBUG] Using development Python script:', pythonScriptPath);
+  }
+
+  console.log('[DEBUG] FFmpeg Bundled Path:', bundledPath);
+  console.log('[DEBUG] Resources Path:', process.resourcesPath);
+
   return {
     pythonPath: 'python',
-    pythonScriptPath: path.join(__dirname, '../../src/videomerger/video_processor_cli.py'),
+    pythonScriptPath,
     supportedFormats: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
     maxFileSizeMb: store.get('maxFileSizeMb', 500) as number,
     ...(bundledPath ? { ffmpegPath: bundledPath } : {}),
@@ -230,6 +251,9 @@ function createWindow(): void {
     },
     title: 'Video Merger',
     backgroundColor: '#1e1e1e',
+    icon: process.env.NODE_ENV === 'development'
+      ? path.join(__dirname, '../../resources/icon.png')
+      : path.join(process.resourcesPath, 'icon.png'),
   });
 
   if (process.env.NODE_ENV === 'development') {
