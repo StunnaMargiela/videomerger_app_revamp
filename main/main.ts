@@ -33,6 +33,7 @@ const GOOGLE_OAUTH_CONFIG = {
   tokenUrl: 'https://oauth2.googleapis.com/token',
   scopes: [
     'https://www.googleapis.com/auth/youtube.upload',
+    'https://www.googleapis.com/auth/youtube.readonly',
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
   ],
@@ -244,6 +245,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -255,6 +257,8 @@ function createWindow(): void {
       ? path.join(__dirname, '../../resources/icon.png')
       : path.join(process.resourcesPath, 'icon.png'),
   });
+
+  mainWindow.setMenuBarVisibility(false);
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:3000');
@@ -333,6 +337,96 @@ function fetchGoogleUserInfo(accessToken: string): Promise<any> {
       });
     }).on('error', reject);
   });
+}
+
+function fetchGoogleApiJson(apiPath: string, accessToken: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'www.googleapis.com',
+      path: apiPath,
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data || '{}');
+          if (res.statusCode && res.statusCode >= 400) {
+            const message = parsed?.error?.message || `Google API error (${res.statusCode})`;
+            reject(new Error(message));
+            return;
+          }
+          resolve(parsed);
+        } catch {
+          reject(new Error('Failed to parse Google API response'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function getYouTubeAccountSummary(accessToken: string): Promise<any> {
+  const channelData = await fetchGoogleApiJson(
+    '/youtube/v3/channels?part=snippet&mine=true',
+    accessToken
+  );
+
+  const channel = channelData?.items?.[0];
+  if (!channel) {
+    return {
+      channel: null,
+      recentVideos: [],
+    };
+  }
+
+  const channelId = channel?.id;
+  const customUrl = channel?.snippet?.customUrl as string | undefined;
+  const channelUrl = customUrl
+    ? `https://www.youtube.com/${customUrl.startsWith('@') ? customUrl : `@${customUrl}`}`
+    : `https://www.youtube.com/channel/${channelId}`;
+
+  let recentVideos: any[] = [];
+  try {
+    const searchData = await fetchGoogleApiJson(
+      '/youtube/v3/search?part=snippet&forMine=true&type=video&order=date&maxResults=6',
+      accessToken
+    );
+
+    recentVideos = (searchData?.items || []).map((item: any) => {
+      const videoId = item?.id?.videoId;
+      return {
+        id: videoId,
+        title: item?.snippet?.title || 'Untitled video',
+        publishedAt: item?.snippet?.publishedAt || null,
+        thumbnailUrl:
+          item?.snippet?.thumbnails?.medium?.url ||
+          item?.snippet?.thumbnails?.default?.url ||
+          null,
+        url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : null,
+      };
+    }).filter((video: any) => Boolean(video?.id));
+  } catch {
+    // Keep summary available even if recent videos cannot be fetched for this token.
+    recentVideos = [];
+  }
+
+  return {
+    channel: {
+      id: channelId,
+      title: channel?.snippet?.title || 'Your Channel',
+      url: channelUrl,
+      thumbnailUrl:
+        channel?.snippet?.thumbnails?.default?.url ||
+        channel?.snippet?.thumbnails?.medium?.url ||
+        null,
+    },
+    recentVideos,
+  };
 }
 
 /**
@@ -431,12 +525,26 @@ function setupIPC(): void {
     return result.filePaths;
   });
 
-  ipcMain.handle('select-save-location', async () => {
+  ipcMain.handle('select-save-location', async (event, initialDirectory?: string) => {
+    const defaultFileName = `merged_video_${Date.now()}.mp4`;
+    const defaultPath = initialDirectory
+      ? path.join(initialDirectory, defaultFileName)
+      : defaultFileName;
     const result = await dialog.showSaveDialog({
-      defaultPath: 'merged_video.mp4',
+      defaultPath,
       filters: [{ name: 'Videos', extensions: ['mp4'] }],
     });
     return result.filePath;
+  });
+
+  ipcMain.handle('select-output-directory', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return undefined;
+    }
+    return result.filePaths[0];
   });
 
   ipcMain.handle('validate-videos', async (event, paths: string[]) => {
@@ -499,6 +607,11 @@ function setupIPC(): void {
     await shell.showItemInFolder(folderPath);
   });
 
+  ipcMain.handle('open-external', async (event, targetUrl: string) => {
+    await shell.openExternal(targetUrl);
+    return true;
+  });
+
   ipcMain.handle('get-settings', async () => {
     return store.store;
   });
@@ -509,6 +622,41 @@ function setupIPC(): void {
     container.clear();
     setupDependencies();
     return true;
+  });
+
+  ipcMain.handle('export-preset-pack', async (event, presetPack: any) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: `videomerger_preset_pack_${Date.now()}.json`,
+      filters: [{ name: 'Preset Packs', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePath) {
+      return { success: false, canceled: true };
+    }
+
+    try {
+      await fs.promises.writeFile(result.filePath, JSON.stringify(presetPack, null, 2), 'utf-8');
+      return { success: true, path: result.filePath };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('import-preset-pack', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Preset Packs', extensions: ['json'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+
+    try {
+      const content = await fs.promises.readFile(result.filePaths[0], 'utf-8');
+      const parsed = JSON.parse(content);
+      return { success: true, data: parsed, path: result.filePaths[0] };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
   });
 
   // --- Google OAuth2 handlers ---
@@ -584,8 +732,11 @@ function setupIPC(): void {
         height: 700,
         parent: mainWindow || undefined,
         modal: true,
+        autoHideMenuBar: true,
         webPreferences: { nodeIntegration: false, contextIsolation: true },
       });
+
+      authWindow.setMenuBarVisibility(false);
 
       authWindow.loadURL(authUrl);
       authWindow.on('closed', () => {
@@ -635,6 +786,25 @@ function setupIPC(): void {
       return result;
     } catch (err: any) {
       return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('youtube-account-summary', async () => {
+    const auth = store.get('googleAuth') as any;
+    if (!auth || !auth.accessToken) {
+      return { success: false, error: 'Not authenticated with Google' };
+    }
+
+    try {
+      const summary = await getYouTubeAccountSummary(auth.accessToken);
+      return { success: true, ...summary };
+    } catch (err: any) {
+      const rawMessage = String(err?.message || 'Failed to load YouTube account details');
+      const needsReauth = /scope|insufficient|permission|forbidden|unauthorized|invalid credentials/i.test(rawMessage);
+      const friendlyMessage = needsReauth
+        ? 'YouTube details need refreshed Google permissions. Please sign out and sign in again.'
+        : rawMessage;
+      return { success: false, error: friendlyMessage, needsReauth };
     }
   });
 }
