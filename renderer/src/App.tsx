@@ -4,7 +4,8 @@ declare global {
   interface Window {
     electronAPI: {
       selectVideoFiles: () => Promise<string[]>;
-      selectSaveLocation: () => Promise<string | undefined>;
+      selectSaveLocation: (initialDirectory?: string) => Promise<string | undefined>;
+      selectOutputDirectory: () => Promise<string | undefined>;
       validateVideos: (paths: string[]) => Promise<boolean>;
       getVideoInfo: (path: string) => Promise<any>;
       getArrangeVideoMetadata: (paths: string[]) => Promise<Record<string, {
@@ -23,10 +24,31 @@ declare global {
       openFolder: (path: string) => Promise<void>;
       getSettings: () => Promise<any>;
       saveSettings: (settings: any) => Promise<void>;
+      exportPresetPack: (presetPack: any) => Promise<{ success: boolean; canceled?: boolean; path?: string; error?: string }>;
+      importPresetPack: () => Promise<{ success: boolean; canceled?: boolean; data?: any; path?: string; error?: string }>;
       googleOAuthLogin: () => Promise<{ success: boolean; user?: any; error?: string }>;
       googleOAuthLogout: () => Promise<{ success: boolean }>;
       getGoogleAuthStatus: () => Promise<{ isLoggedIn: boolean; user?: any }>;
       uploadToYouTube: (options: any) => Promise<any>;
+      getYouTubeAccountSummary: () => Promise<{
+        success: boolean;
+        error?: string;
+        needsReauth?: boolean;
+        channel?: {
+          id: string;
+          title: string;
+          url: string;
+          thumbnailUrl?: string | null;
+        } | null;
+        recentVideos?: Array<{
+          id: string;
+          title: string;
+          publishedAt?: string | null;
+          thumbnailUrl?: string | null;
+          url?: string | null;
+        }>;
+      }>;
+      openExternal: (url: string) => Promise<boolean>;
       onProcessingEvent: (callback: (event: any) => void) => void;
     };
   }
@@ -63,6 +85,29 @@ interface YouTubeQuickPreset {
   privacy: string;
 }
 
+interface GoogleUser {
+  name?: string;
+  email?: string;
+  picture?: string;
+}
+
+interface YouTubeChannelSummary {
+  id: string;
+  title: string;
+  url: string;
+  thumbnailUrl?: string | null;
+}
+
+interface YouTubeRecentVideo {
+  id: string;
+  title: string;
+  publishedAt?: string | null;
+  thumbnailUrl?: string | null;
+  url?: string | null;
+}
+
+type AppTheme = 'olive-dark' | 'midnight-blue' | 'sand-light';
+
 const App: React.FC = () => {
   // Wizard state
   const [step, setStep] = useState<number>(0); // 0 = auth prompt
@@ -90,7 +135,7 @@ const App: React.FC = () => {
 
   // Auth state
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
   const [authChecked, setAuthChecked] = useState<boolean>(false);
 
   // YouTube config state
@@ -103,6 +148,8 @@ const App: React.FC = () => {
   const [ytPresetName, setYtPresetName] = useState<string>('');
   const [ytQuickPresets, setYtQuickPresets] = useState<YouTubeQuickPreset[]>([]);
   const [selectedYtPresetName, setSelectedYtPresetName] = useState<string>('');
+  const [appTheme, setAppTheme] = useState<AppTheme>('olive-dark');
+  const [defaultOutputDir, setDefaultOutputDir] = useState<string>('');
 
   // Arrange sort state
   const [sortBy, setSortBy] = useState<SortField>('none');
@@ -142,19 +189,31 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const loadQuickPresets = async () => {
+    const loadAppSettings = async () => {
       try {
         const settings = await window.electronAPI.getSettings();
         const presets = settings?.ytQuickPresets;
         if (Array.isArray(presets)) {
           setYtQuickPresets(presets.filter((p: any) => p && typeof p.name === 'string'));
         }
+
+        if (typeof settings?.appTheme === 'string') {
+          setAppTheme(settings.appTheme as AppTheme);
+        }
+
+        if (typeof settings?.defaultOutputDir === 'string') {
+          setDefaultOutputDir(settings.defaultOutputDir);
+        }
       } catch {
         // noop
       }
     };
-    loadQuickPresets();
+    loadAppSettings();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', appTheme);
+  }, [appTheme]);
 
   const canProceedStep1 = selectedFiles.length >= 2;
   const canProceedStep2 = selectedFiles.length >= 2;
@@ -272,7 +331,15 @@ const App: React.FC = () => {
     setStep(1);
   };
 
-  const handleSkipLogin = () => {
+  const handleSkipLogin = async () => {
+    // Explicitly clear any persisted Google session when user chooses guest flow.
+    try {
+      await window.electronAPI.googleOAuthLogout();
+    } catch {
+      // Continue in guest mode even if logout IPC fails.
+    }
+    setIsLoggedIn(false);
+    setGoogleUser(null);
     setStep(1);
   };
 
@@ -550,9 +617,21 @@ const App: React.FC = () => {
     return `${mb.toFixed(1)} MB`;
   };
 
+  const buildDefaultOutputPath = (): string => {
+    if (!defaultOutputDir) return '';
+    const separator = defaultOutputDir.includes('\\') ? '\\' : '/';
+    const safeBaseDir = defaultOutputDir.replace(/[\\/]+$/, '');
+    return `${safeBaseDir}${separator}merged_video_${Date.now()}.mp4`;
+  };
+
+  const suggestedOutputPath = useMemo(() => {
+    if (outputPath) return outputPath;
+    return buildDefaultOutputPath();
+  }, [outputPath, defaultOutputDir]);
+
   // --- Output & Merge ---
   const handleSelectOutput = async () => {
-    const path = await window.electronAPI.selectSaveLocation();
+    const path = await window.electronAPI.selectSaveLocation(defaultOutputDir || undefined);
     if (path) {
       setOutputPath(path);
       setStatus(`Output: ${path}`);
@@ -564,9 +643,13 @@ const App: React.FC = () => {
       setStatus('Please select at least 2 videos');
       return;
     }
-    if (!outputPath) {
-      setStatus('Please select output location');
+    const resolvedOutputPath = suggestedOutputPath;
+    if (!resolvedOutputPath) {
+      setStatus('Please select output location or set a default output folder in Settings.');
       return;
+    }
+    if (!outputPath) {
+      setOutputPath(resolvedOutputPath);
     }
 
     setIsMerging(true);
@@ -585,7 +668,7 @@ const App: React.FC = () => {
 
     const result = await window.electronAPI.mergeVideos({
       inputPaths: selectedFiles,
-      outputPath: outputPath,
+      outputPath: resolvedOutputPath,
       standardization: standardization,
     });
 
@@ -821,7 +904,11 @@ const App: React.FC = () => {
               ffmpegDetails={ffmpegDetails}
               standardization={standardization}
               initialTab={dashboardInitialTab}
+              appTheme={appTheme}
+              defaultOutputDir={defaultOutputDir}
               onStandardizationChange={setStandardization}
+              onThemeChange={setAppTheme}
+              onDefaultOutputDirChange={setDefaultOutputDir}
               onLogout={handleLogout}
               onLogin={handleGoogleLogin}
             />
@@ -884,7 +971,7 @@ const App: React.FC = () => {
                 }}
                 type="button"
               >
-                {googleUser.name?.charAt(0) || '?'}
+                <UserAvatar user={googleUser} size="small" />
               </button>
             )}
           </div>
@@ -974,8 +1061,8 @@ const App: React.FC = () => {
               {/* Step 1: Add Videos */}
               {step === 1 && (
                 <section className="panel fade-in">
-                  <h2>Add your videos</h2>
-                  <p className="panel-subtitle">Choose at least two clips to start your merge workflow.</p>
+                  <h2 className="step-title-centered">Add your videos</h2>
+                  <p className="panel-subtitle step-subtitle-centered">Choose at least two clips to start your merge workflow.</p>
 
                   <div
                     className={`dropzone ${isDragOver ? 'dropzone-drag-over' : ''}`}
@@ -1063,7 +1150,6 @@ const App: React.FC = () => {
                           <video
                             key={`arrange-${previewVideoSrc}`}
                             className="preview-player"
-                            controls
                             autoPlay
                             preload="metadata"
                             src={previewVideoSrc}
@@ -1182,7 +1268,6 @@ const App: React.FC = () => {
                             <video
                               key={previewVideoSrc}
                               className="preview-player"
-                              controls
                               autoPlay
                               preload="metadata"
                               src={previewVideoSrc}
@@ -1257,7 +1342,7 @@ const App: React.FC = () => {
                             Choose save location
                           </button>
                           <div className="output-path-box">
-                            {outputPath || 'No output path selected yet'}
+                            {suggestedOutputPath || 'No output path selected yet'}
                           </div>
                         </div>
                       </div>
@@ -1391,7 +1476,7 @@ const App: React.FC = () => {
                 isMerging ||
                 (step === 1 && !canProceedStep1) ||
                 (step === 2 && !canProceedStep2) ||
-                (step === 3 && !outputPath)
+                (step === 3 && !outputPath && !defaultOutputDir)
               }
             >
               {nextLabel}
@@ -1406,42 +1491,128 @@ const App: React.FC = () => {
 // --- Dashboard Panel Component ---
 interface DashboardPanelProps {
   isLoggedIn: boolean;
-  googleUser: any;
+  googleUser: GoogleUser | null;
   ffmpegDetails: any;
   standardization: { resolution: string; fps: string };
   initialTab: 'general' | 'youtube' | 'ffmpeg' | 'account';
+  appTheme: AppTheme;
+  defaultOutputDir: string;
   onStandardizationChange: (s: { resolution: string; fps: string }) => void;
+  onThemeChange: (theme: AppTheme) => void;
+  onDefaultOutputDirChange: (path: string) => void;
   onLogout: () => void;
   onLogin: () => void;
 }
 
+interface UserAvatarProps {
+  user: GoogleUser | null;
+  size: 'small' | 'large';
+}
+
+const UserAvatar: React.FC<UserAvatarProps> = ({ user, size }) => {
+  const [imgFailed, setImgFailed] = useState(false);
+  const hasImage = Boolean(user?.picture) && !imgFailed;
+  const initials = user?.name?.charAt(0)?.toUpperCase() || '?';
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [user?.picture]);
+
+  return hasImage ? (
+    <img
+      src={user?.picture}
+      alt={user?.name ? `${user.name} profile` : 'Google profile'}
+      className={size === 'small' ? 'user-badge-image' : 'user-badge-large-image'}
+      onError={() => setImgFailed(true)}
+      loading="eager"
+      decoding="async"
+      referrerPolicy="no-referrer"
+    />
+  ) : (
+    <span>{initials}</span>
+  );
+};
+
 const DashboardPanel: React.FC<DashboardPanelProps> = ({
-  isLoggedIn, googleUser, ffmpegDetails, standardization, initialTab, onStandardizationChange, onLogout, onLogin
+  isLoggedIn, googleUser, ffmpegDetails, standardization, initialTab, appTheme, defaultOutputDir,
+  onStandardizationChange, onThemeChange, onDefaultOutputDirChange, onLogout, onLogin
 }) => {
   const [settings, setSettings] = useState<any>({
-    maxFileSizeMb: 500,
-    defaultResolution: 'original',
-    defaultFps: 'original',
+    appTheme: appTheme,
+    defaultOutputDir: defaultOutputDir,
     ytDefaultPrivacy: 'private',
     ytDefaultTitle: '',
     ytDefaultDescription: '',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const [ytQuickPresets, setYtQuickPresets] = useState<YouTubeQuickPreset[]>([]);
+  const [ytPresetName, setYtPresetName] = useState<string>('');
+  const [selectedYtPresetName, setSelectedYtPresetName] = useState<string>('');
+  const [ytChannel, setYtChannel] = useState<YouTubeChannelSummary | null>(null);
+  const [ytRecentVideos, setYtRecentVideos] = useState<YouTubeRecentVideo[]>([]);
+  const [ytSummaryLoading, setYtSummaryLoading] = useState(false);
+  const [ytSummaryError, setYtSummaryError] = useState<string>('');
+  const [ytSummaryNeedsReauth, setYtSummaryNeedsReauth] = useState(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
   useEffect(() => {
+    setSettings((prev: any) => ({
+      ...prev,
+      appTheme,
+      defaultOutputDir,
+    }));
+  }, [appTheme, defaultOutputDir]);
+
+  useEffect(() => {
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    const loadYouTubeSummary = async () => {
+      if (!isLoggedIn || activeTab !== 'account') {
+        return;
+      }
+
+      setYtSummaryLoading(true);
+      setYtSummaryError('');
+      setYtSummaryNeedsReauth(false);
+
+      try {
+        const result = await window.electronAPI.getYouTubeAccountSummary();
+        if (!result.success) {
+          setYtSummaryError(result.error || 'Unable to load YouTube channel details.');
+          setYtSummaryNeedsReauth(Boolean(result.needsReauth));
+          setYtChannel(null);
+          setYtRecentVideos([]);
+          return;
+        }
+        setYtChannel(result.channel || null);
+        setYtRecentVideos(result.recentVideos || []);
+      } catch {
+        setYtSummaryError('Unable to load YouTube channel details.');
+        setYtSummaryNeedsReauth(false);
+        setYtChannel(null);
+        setYtRecentVideos([]);
+      } finally {
+        setYtSummaryLoading(false);
+      }
+    };
+
+    loadYouTubeSummary();
+  }, [activeTab, isLoggedIn]);
 
   const loadSettings = async () => {
     try {
       const data = await window.electronAPI.getSettings();
       if (data) {
         setSettings((prev: any) => ({ ...prev, ...data }));
+        if (Array.isArray(data.ytQuickPresets)) {
+          setYtQuickPresets(data.ytQuickPresets.filter((p: any) => p && typeof p.name === 'string'));
+        }
       }
     } catch {
       // fallback
@@ -1450,7 +1621,9 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
 
   const handleSave = async () => {
     setIsSaving(true);
-    await window.electronAPI.saveSettings({ ...settings });
+    await window.electronAPI.saveSettings({ ...settings, ytQuickPresets });
+    onThemeChange((settings.appTheme || 'olive-dark') as AppTheme);
+    onDefaultOutputDirChange(settings.defaultOutputDir || '');
     onStandardizationChange({
       resolution: settings.defaultResolution || 'original',
       fps: settings.defaultFps || 'original',
@@ -1458,11 +1631,90 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
     setIsSaving(false);
   };
 
+  const handlePickDefaultOutputDir = async () => {
+    const directory = await window.electronAPI.selectOutputDirectory();
+    if (!directory) return;
+    setSettings((prev: any) => ({ ...prev, defaultOutputDir: directory }));
+  };
+
+  const handleExportPresetPack = async () => {
+    const presetPack = {
+      version: 1,
+      app: 'videomerger-desktop',
+      exportedAt: new Date().toISOString(),
+      youtubeDefaults: {
+        ytDefaultTitle: settings.ytDefaultTitle || '',
+        ytDefaultDescription: settings.ytDefaultDescription || '',
+        ytDefaultPrivacy: settings.ytDefaultPrivacy || 'private',
+      },
+      ytQuickPresets,
+    };
+    await window.electronAPI.exportPresetPack(presetPack);
+  };
+
+  const handleImportPresetPack = async () => {
+    const result = await window.electronAPI.importPresetPack();
+    if (!result?.success || !result.data) return;
+
+    const importedDefaults = result.data.youtubeDefaults || {};
+    const importedQuickPresets = Array.isArray(result.data.ytQuickPresets)
+      ? result.data.ytQuickPresets.filter((p: any) => p && typeof p.name === 'string')
+      : [];
+
+    setSettings((prev: any) => ({
+      ...prev,
+      ytDefaultTitle: importedDefaults.ytDefaultTitle || prev.ytDefaultTitle || '',
+      ytDefaultDescription: importedDefaults.ytDefaultDescription || prev.ytDefaultDescription || '',
+      ytDefaultPrivacy: importedDefaults.ytDefaultPrivacy || prev.ytDefaultPrivacy || 'private',
+    }));
+    setYtQuickPresets(importedQuickPresets);
+    setSelectedYtPresetName('');
+  };
+
+  const handleSaveYtQuickPreset = async () => {
+    const name = ytPresetName.trim();
+    if (!name) return;
+
+    const newPreset: YouTubeQuickPreset = {
+      name,
+      title: settings.ytDefaultTitle || '',
+      description: settings.ytDefaultDescription || '',
+      privacy: settings.ytDefaultPrivacy || 'private',
+    };
+
+    const nextPresets = [
+      ...ytQuickPresets.filter((preset) => preset.name.toLowerCase() !== name.toLowerCase()),
+      newPreset,
+    ];
+    setYtQuickPresets(nextPresets);
+    setSelectedYtPresetName(name);
+    await window.electronAPI.saveSettings({ ...settings, ytQuickPresets: nextPresets });
+  };
+
+  const handleLoadYtQuickPreset = () => {
+    const preset = ytQuickPresets.find((item) => item.name === selectedYtPresetName);
+    if (!preset) return;
+    setSettings((prev: any) => ({
+      ...prev,
+      ytDefaultTitle: preset.title,
+      ytDefaultDescription: preset.description,
+      ytDefaultPrivacy: preset.privacy,
+    }));
+  };
+
+  const handleDeleteYtQuickPreset = async () => {
+    if (!selectedYtPresetName) return;
+    const nextPresets = ytQuickPresets.filter((preset) => preset.name !== selectedYtPresetName);
+    setYtQuickPresets(nextPresets);
+    setSelectedYtPresetName('');
+    await window.electronAPI.saveSettings({ ...settings, ytQuickPresets: nextPresets });
+  };
+
   const tabs = [
-    { id: 'general', label: '⚙ General' },
-    { id: 'youtube', label: '📺 YouTube' },
-    { id: 'ffmpeg', label: '🎬 FFmpeg' },
-    { id: 'account', label: '👤 Account' },
+    { id: 'general', label: 'General' },
+    { id: 'youtube', label: 'YouTube' },
+    { id: 'ffmpeg', label: 'FFmpeg' },
+    { id: 'account', label: 'Account' },
   ];
 
   return (
@@ -1484,38 +1736,40 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
           <div className="dash-section">
             <h3>General Settings</h3>
             <label className="std-label">
-              Max File Size (MB)
-              <input
-                type="number"
-                value={settings.maxFileSizeMb}
-                onChange={e => setSettings({ ...settings, maxFileSizeMb: parseInt(e.target.value) || 500 })}
-                className="yt-input"
-              />
-            </label>
-            <label className="std-label">
-              Default Resolution
+              Theme
               <select
                 className="std-select"
-                value={settings.defaultResolution}
-                onChange={e => setSettings({ ...settings, defaultResolution: e.target.value })}
+                value={settings.appTheme || 'olive-dark'}
+                onChange={e => {
+                  const nextTheme = e.target.value as AppTheme;
+                  setSettings({ ...settings, appTheme: nextTheme });
+                  onThemeChange(nextTheme);
+                }}
               >
-                {RESOLUTION_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
+                <option value="olive-dark">Olive Dark</option>
+                <option value="midnight-blue">Midnight Blue</option>
+                <option value="sand-light">Sand Light</option>
               </select>
             </label>
-            <label className="std-label">
-              Default Frame Rate
-              <select
-                className="std-select"
-                value={settings.defaultFps}
-                onChange={e => setSettings({ ...settings, defaultFps: e.target.value })}
-              >
-                {FPS_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </label>
+            <div className="output-row" style={{ marginBottom: 0 }}>
+              <button className="btn btn-secondary" type="button" onClick={handlePickDefaultOutputDir}>
+                Choose Default Save Folder
+              </button>
+              <div className="output-path-box">
+                {settings.defaultOutputDir || 'No default folder selected'}
+              </div>
+            </div>
+
+            <div className="preview-block" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Preset Pack</h3>
+              <p className="panel-subtitle" style={{ marginBottom: 10 }}>
+                Export your YouTube defaults and quick presets as a reusable preset pack.
+              </p>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary" type="button" onClick={handleExportPresetPack}>Export Preset Pack</button>
+                <button className="btn btn-ghost" type="button" onClick={handleImportPresetPack}>Import Preset Pack</button>
+              </div>
+            </div>
             <button className="btn btn-primary" onClick={handleSave} disabled={isSaving} style={{ marginTop: 16 }}>
               {isSaving ? 'Saving...' : 'Save Settings'}
             </button>
@@ -1529,38 +1783,80 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
               <div className="empty-state">Sign in with Google to configure YouTube settings.</div>
             ) : (
               <>
-                <label className="std-label">
-                  Default Title
-                  <input
-                    type="text"
-                    value={settings.ytDefaultTitle}
-                    onChange={e => setSettings({ ...settings, ytDefaultTitle: e.target.value })}
-                    className="yt-input"
-                    placeholder="My Merged Video"
-                  />
-                </label>
-                <label className="std-label">
-                  Default Description
-                  <textarea
-                    value={settings.ytDefaultDescription}
-                    onChange={e => setSettings({ ...settings, ytDefaultDescription: e.target.value })}
-                    className="yt-input"
-                    rows={3}
-                    placeholder="Video description..."
-                  />
-                </label>
-                <label className="std-label">
-                  Default Privacy
-                  <select
-                    className="std-select"
-                    value={settings.ytDefaultPrivacy}
-                    onChange={e => setSettings({ ...settings, ytDefaultPrivacy: e.target.value })}
-                  >
-                    <option value="private">Private</option>
-                    <option value="unlisted">Unlisted</option>
-                    <option value="public">Public</option>
-                  </select>
-                </label>
+                <div className="yt-config yt-config-compact">
+                  <div className="yt-inline-row">
+                    <label>
+                      Default Title
+                      <input
+                        type="text"
+                        value={settings.ytDefaultTitle}
+                        onChange={e => setSettings({ ...settings, ytDefaultTitle: e.target.value })}
+                        className="yt-input"
+                        placeholder="My Merged Video"
+                      />
+                    </label>
+                    <label>
+                      Default Privacy
+                      <select
+                        className="std-select"
+                        value={settings.ytDefaultPrivacy}
+                        onChange={e => setSettings({ ...settings, ytDefaultPrivacy: e.target.value })}
+                      >
+                        <option value="private">Private</option>
+                        <option value="unlisted">Unlisted</option>
+                        <option value="public">Public</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label>
+                    Default Description
+                    <textarea
+                      value={settings.ytDefaultDescription}
+                      onChange={e => setSettings({ ...settings, ytDefaultDescription: e.target.value })}
+                      className="yt-input"
+                      rows={2}
+                      placeholder="Video description..."
+                    />
+                  </label>
+
+                  <div className="yt-preset-row">
+                    <label>
+                      Preset Name
+                      <input
+                        type="text"
+                        value={ytPresetName}
+                        onChange={(e) => setYtPresetName(e.target.value)}
+                        placeholder="e.g. Weekly Highlights"
+                        className="yt-input"
+                      />
+                    </label>
+                    <button className="btn btn-secondary" type="button" onClick={handleSaveYtQuickPreset}>
+                      Save Preset
+                    </button>
+                  </div>
+
+                  <div className="yt-preset-row">
+                    <label>
+                      Load Preset
+                      <select
+                        className="std-select"
+                        value={selectedYtPresetName}
+                        onChange={(e) => setSelectedYtPresetName(e.target.value)}
+                      >
+                        <option value="">Select preset</option>
+                        {ytQuickPresets.map((preset) => (
+                          <option key={preset.name} value={preset.name}>{preset.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="yt-preset-actions">
+                      <button className="btn btn-secondary" type="button" onClick={handleLoadYtQuickPreset}>Load</button>
+                      <button className="btn btn-ghost" type="button" onClick={handleDeleteYtQuickPreset}>Delete</button>
+                    </div>
+                  </div>
+                </div>
+
                 <button className="btn btn-primary" onClick={handleSave} disabled={isSaving} style={{ marginTop: 16 }}>
                   {isSaving ? 'Saving...' : 'Save YouTube Defaults'}
                 </button>
@@ -1593,7 +1889,9 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
             {isLoggedIn ? (
               <div>
                 <div className="account-card">
-                  <div className="user-badge-large">{googleUser?.name?.charAt(0) || '?'}</div>
+                  <div className="user-badge-large">
+                    <UserAvatar user={googleUser} size="large" />
+                  </div>
                   <div>
                     <strong>{googleUser?.name || 'Google User'}</strong>
                     <p style={{ margin: '4px 0 0', color: 'var(--olive-300)', fontSize: '0.85rem' }}>
@@ -1601,6 +1899,69 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                     </p>
                   </div>
                 </div>
+
+                <div className="account-youtube-block">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <h4 style={{ margin: 0 }}>YouTube Channel</h4>
+                    {ytChannel?.url && (
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        onClick={() => window.electronAPI.openExternal(ytChannel.url)}
+                      >
+                        Open Channel
+                      </button>
+                    )}
+                  </div>
+
+                  {ytSummaryLoading ? (
+                    <p className="panel-subtitle" style={{ marginTop: 10 }}>Loading channel details...</p>
+                  ) : ytSummaryError ? (
+                    <div style={{ marginTop: 10 }}>
+                      <p className="upload-error" style={{ marginTop: 0 }}>{ytSummaryError}</p>
+                      {ytSummaryNeedsReauth && (
+                        <button className="btn btn-ghost" type="button" onClick={onLogout}>
+                          Reconnect Google
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="panel-subtitle" style={{ marginTop: 8, marginBottom: 10 }}>
+                        {ytChannel?.title || 'Channel unavailable'}
+                      </p>
+
+                      {ytRecentVideos.length > 0 ? (
+                        <ul className="yt-recent-list">
+                          {ytRecentVideos.map((video) => (
+                            <li key={video.id} className="yt-recent-item">
+                              <button
+                                className="yt-recent-link"
+                                type="button"
+                                onClick={() => {
+                                  if (video.url) {
+                                    window.electronAPI.openExternal(video.url);
+                                  }
+                                }}
+                                title={video.title}
+                              >
+                                <span className="yt-recent-title">{video.title}</span>
+                                <span className="yt-recent-date">
+                                  {video.publishedAt ? new Date(video.publishedAt).toLocaleDateString() : 'Unknown date'}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="panel-subtitle" style={{ marginTop: 8, marginBottom: 0 }}>
+                          No recent uploads found.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <button className="btn btn-secondary" onClick={onLogout} style={{ marginTop: 16 }}>
                   Sign out
                 </button>
