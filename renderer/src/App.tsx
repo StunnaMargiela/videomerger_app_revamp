@@ -30,6 +30,25 @@ declare global {
       googleOAuthLogout: () => Promise<{ success: boolean }>;
       getGoogleAuthStatus: () => Promise<{ isLoggedIn: boolean; user?: any }>;
       uploadToYouTube: (options: any) => Promise<any>;
+      getYouTubeAccountSummary: () => Promise<{
+        success: boolean;
+        error?: string;
+        needsReauth?: boolean;
+        channel?: {
+          id: string;
+          title: string;
+          url: string;
+          thumbnailUrl?: string | null;
+        } | null;
+        recentVideos?: Array<{
+          id: string;
+          title: string;
+          publishedAt?: string | null;
+          thumbnailUrl?: string | null;
+          url?: string | null;
+        }>;
+      }>;
+      openExternal: (url: string) => Promise<boolean>;
       onProcessingEvent: (callback: (event: any) => void) => void;
     };
   }
@@ -66,6 +85,27 @@ interface YouTubeQuickPreset {
   privacy: string;
 }
 
+interface GoogleUser {
+  name?: string;
+  email?: string;
+  picture?: string;
+}
+
+interface YouTubeChannelSummary {
+  id: string;
+  title: string;
+  url: string;
+  thumbnailUrl?: string | null;
+}
+
+interface YouTubeRecentVideo {
+  id: string;
+  title: string;
+  publishedAt?: string | null;
+  thumbnailUrl?: string | null;
+  url?: string | null;
+}
+
 type AppTheme = 'olive-dark' | 'midnight-blue' | 'sand-light';
 
 const App: React.FC = () => {
@@ -95,7 +135,7 @@ const App: React.FC = () => {
 
   // Auth state
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
   const [authChecked, setAuthChecked] = useState<boolean>(false);
 
   // YouTube config state
@@ -291,7 +331,15 @@ const App: React.FC = () => {
     setStep(1);
   };
 
-  const handleSkipLogin = () => {
+  const handleSkipLogin = async () => {
+    // Explicitly clear any persisted Google session when user chooses guest flow.
+    try {
+      await window.electronAPI.googleOAuthLogout();
+    } catch {
+      // Continue in guest mode even if logout IPC fails.
+    }
+    setIsLoggedIn(false);
+    setGoogleUser(null);
     setStep(1);
   };
 
@@ -576,6 +624,11 @@ const App: React.FC = () => {
     return `${safeBaseDir}${separator}merged_video_${Date.now()}.mp4`;
   };
 
+  const suggestedOutputPath = useMemo(() => {
+    if (outputPath) return outputPath;
+    return buildDefaultOutputPath();
+  }, [outputPath, defaultOutputDir]);
+
   // --- Output & Merge ---
   const handleSelectOutput = async () => {
     const path = await window.electronAPI.selectSaveLocation(defaultOutputDir || undefined);
@@ -590,7 +643,7 @@ const App: React.FC = () => {
       setStatus('Please select at least 2 videos');
       return;
     }
-    const resolvedOutputPath = outputPath || buildDefaultOutputPath();
+    const resolvedOutputPath = suggestedOutputPath;
     if (!resolvedOutputPath) {
       setStatus('Please select output location or set a default output folder in Settings.');
       return;
@@ -918,7 +971,7 @@ const App: React.FC = () => {
                 }}
                 type="button"
               >
-                {googleUser.name?.charAt(0) || '?'}
+                <UserAvatar user={googleUser} size="small" />
               </button>
             )}
           </div>
@@ -1289,7 +1342,7 @@ const App: React.FC = () => {
                             Choose save location
                           </button>
                           <div className="output-path-box">
-                            {outputPath || 'No output path selected yet'}
+                            {suggestedOutputPath || 'No output path selected yet'}
                           </div>
                         </div>
                       </div>
@@ -1438,7 +1491,7 @@ const App: React.FC = () => {
 // --- Dashboard Panel Component ---
 interface DashboardPanelProps {
   isLoggedIn: boolean;
-  googleUser: any;
+  googleUser: GoogleUser | null;
   ffmpegDetails: any;
   standardization: { resolution: string; fps: string };
   initialTab: 'general' | 'youtube' | 'ffmpeg' | 'account';
@@ -1450,6 +1503,35 @@ interface DashboardPanelProps {
   onLogout: () => void;
   onLogin: () => void;
 }
+
+interface UserAvatarProps {
+  user: GoogleUser | null;
+  size: 'small' | 'large';
+}
+
+const UserAvatar: React.FC<UserAvatarProps> = ({ user, size }) => {
+  const [imgFailed, setImgFailed] = useState(false);
+  const hasImage = Boolean(user?.picture) && !imgFailed;
+  const initials = user?.name?.charAt(0)?.toUpperCase() || '?';
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [user?.picture]);
+
+  return hasImage ? (
+    <img
+      src={user?.picture}
+      alt={user?.name ? `${user.name} profile` : 'Google profile'}
+      className={size === 'small' ? 'user-badge-image' : 'user-badge-large-image'}
+      onError={() => setImgFailed(true)}
+      loading="eager"
+      decoding="async"
+      referrerPolicy="no-referrer"
+    />
+  ) : (
+    <span>{initials}</span>
+  );
+};
 
 const DashboardPanel: React.FC<DashboardPanelProps> = ({
   isLoggedIn, googleUser, ffmpegDetails, standardization, initialTab, appTheme, defaultOutputDir,
@@ -1467,6 +1549,11 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
   const [ytQuickPresets, setYtQuickPresets] = useState<YouTubeQuickPreset[]>([]);
   const [ytPresetName, setYtPresetName] = useState<string>('');
   const [selectedYtPresetName, setSelectedYtPresetName] = useState<string>('');
+  const [ytChannel, setYtChannel] = useState<YouTubeChannelSummary | null>(null);
+  const [ytRecentVideos, setYtRecentVideos] = useState<YouTubeRecentVideo[]>([]);
+  const [ytSummaryLoading, setYtSummaryLoading] = useState(false);
+  const [ytSummaryError, setYtSummaryError] = useState<string>('');
+  const [ytSummaryNeedsReauth, setYtSummaryNeedsReauth] = useState(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -1483,6 +1570,40 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
   useEffect(() => {
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    const loadYouTubeSummary = async () => {
+      if (!isLoggedIn || activeTab !== 'account') {
+        return;
+      }
+
+      setYtSummaryLoading(true);
+      setYtSummaryError('');
+      setYtSummaryNeedsReauth(false);
+
+      try {
+        const result = await window.electronAPI.getYouTubeAccountSummary();
+        if (!result.success) {
+          setYtSummaryError(result.error || 'Unable to load YouTube channel details.');
+          setYtSummaryNeedsReauth(Boolean(result.needsReauth));
+          setYtChannel(null);
+          setYtRecentVideos([]);
+          return;
+        }
+        setYtChannel(result.channel || null);
+        setYtRecentVideos(result.recentVideos || []);
+      } catch {
+        setYtSummaryError('Unable to load YouTube channel details.');
+        setYtSummaryNeedsReauth(false);
+        setYtChannel(null);
+        setYtRecentVideos([]);
+      } finally {
+        setYtSummaryLoading(false);
+      }
+    };
+
+    loadYouTubeSummary();
+  }, [activeTab, isLoggedIn]);
 
   const loadSettings = async () => {
     try {
@@ -1768,7 +1889,9 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
             {isLoggedIn ? (
               <div>
                 <div className="account-card">
-                  <div className="user-badge-large">{googleUser?.name?.charAt(0) || '?'}</div>
+                  <div className="user-badge-large">
+                    <UserAvatar user={googleUser} size="large" />
+                  </div>
                   <div>
                     <strong>{googleUser?.name || 'Google User'}</strong>
                     <p style={{ margin: '4px 0 0', color: 'var(--olive-300)', fontSize: '0.85rem' }}>
@@ -1776,6 +1899,69 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                     </p>
                   </div>
                 </div>
+
+                <div className="account-youtube-block">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <h4 style={{ margin: 0 }}>YouTube Channel</h4>
+                    {ytChannel?.url && (
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        onClick={() => window.electronAPI.openExternal(ytChannel.url)}
+                      >
+                        Open Channel
+                      </button>
+                    )}
+                  </div>
+
+                  {ytSummaryLoading ? (
+                    <p className="panel-subtitle" style={{ marginTop: 10 }}>Loading channel details...</p>
+                  ) : ytSummaryError ? (
+                    <div style={{ marginTop: 10 }}>
+                      <p className="upload-error" style={{ marginTop: 0 }}>{ytSummaryError}</p>
+                      {ytSummaryNeedsReauth && (
+                        <button className="btn btn-ghost" type="button" onClick={onLogout}>
+                          Reconnect Google
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="panel-subtitle" style={{ marginTop: 8, marginBottom: 10 }}>
+                        {ytChannel?.title || 'Channel unavailable'}
+                      </p>
+
+                      {ytRecentVideos.length > 0 ? (
+                        <ul className="yt-recent-list">
+                          {ytRecentVideos.map((video) => (
+                            <li key={video.id} className="yt-recent-item">
+                              <button
+                                className="yt-recent-link"
+                                type="button"
+                                onClick={() => {
+                                  if (video.url) {
+                                    window.electronAPI.openExternal(video.url);
+                                  }
+                                }}
+                                title={video.title}
+                              >
+                                <span className="yt-recent-title">{video.title}</span>
+                                <span className="yt-recent-date">
+                                  {video.publishedAt ? new Date(video.publishedAt).toLocaleDateString() : 'Unknown date'}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="panel-subtitle" style={{ marginTop: 8, marginBottom: 0 }}>
+                          No recent uploads found.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <button className="btn btn-secondary" onClick={onLogout} style={{ marginTop: 16 }}>
                   Sign out
                 </button>

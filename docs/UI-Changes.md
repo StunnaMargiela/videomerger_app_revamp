@@ -120,3 +120,33 @@
 ### Remove Button Text Readability
 - Updated remove-action button text color to use a theme variable (`--danger-text`) instead of a fixed near-white value.
 - Set per-theme danger text values so the label stays readable, especially in Sand Light where white text looked off.
+
+### Native Top Menu Hidden
+- Removed the native Electron menu bar (`File / Edit / View / Window / Help`) from the app window for a cleaner custom UI shell.
+- Applied the same hidden-menu behavior to the Google OAuth popup window for consistency.
+
+### Google Profile Avatar Display
+- Updated authenticated user badge (top-right circular profile button) to display the Google profile picture when available.
+- Updated Dashboard `Account` tab card to display the same Google profile picture.
+- Added resilient fallback behavior: if image is missing or fails to load, avatar falls back to user initials.
+
+### Guest Mode Auth Consistency
+- Updated `Continue without account` action to force Google logout before entering the main workflow.
+- This prevents carry-over of a previous signed-in session when user explicitly chooses guest mode.
+
+### Header Avatar Side-Bleed Fix
+- Fixed the small top-right profile avatar circle showing blue side slivers around the Google image.
+- Reset native button padding/appearance on the avatar button so the profile image fills the circular badge edge-to-edge.
+
+### Account Tab YouTube Section
+- Added a YouTube section in Account tab with an `Open Channel` action.
+- Added a recent-upload list (latest channel videos) with clickable entries that open each video link.
+- Added loading/error/empty states for YouTube account fetch results.
+
+### YouTube Account Error Recovery UX
+- Improved Account tab YouTube error behavior with a specific reconnect path when permissions are stale.
+- Added a `Reconnect Google` action on YouTube summary failures that require re-authentication.
+
+### Finalization Default Location Carry-Over
+- Fixed Finalization `Save destination` display to reflect the configured default output folder when no manual save path is selected.
+- Merge action now uses the same suggested path shown in the UI, keeping displayed destination and merge output target aligned.

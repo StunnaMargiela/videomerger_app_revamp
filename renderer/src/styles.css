@@ -281,6 +281,7 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 50%;
+  overflow: hidden;
   background: linear-gradient(140deg, #228af0, #1772cc);
   color: #fff;
   display: grid;
@@ -290,7 +291,10 @@ body {
 }
 
 .user-badge-btn {
+  padding: 0;
   border: none;
+  appearance: none;
+  -webkit-appearance: none;
   cursor: pointer;
 }
 
@@ -302,12 +306,21 @@ body {
   width: 52px;
   height: 52px;
   border-radius: 50%;
+  overflow: hidden;
   background: linear-gradient(140deg, #228af0, #1772cc);
   color: #fff;
   display: grid;
   place-items: center;
   font-weight: 700;
   font-size: 1.3rem;
+}
+
+.user-badge-image,
+.user-badge-large-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* ─── Stepper ─── */
@@ -1152,6 +1165,60 @@ body {
   background-color: var(--surface-card);
   border: 1px solid var(--olive-700);
   border-radius: 12px;
+}
+
+.account-youtube-block {
+  margin-top: 12px;
+  border: 1px solid var(--olive-700);
+  border-radius: 12px;
+  background-color: var(--surface-card);
+  padding: 12px;
+}
+
+.yt-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.yt-recent-item {
+  margin: 0;
+}
+
+.yt-recent-link {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--olive-700);
+  border-radius: 10px;
+  background-color: var(--toolbar-bg);
+  color: var(--olive-200);
+  padding: 9px 10px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.yt-recent-link:hover {
+  background-color: var(--control-bg);
+  border-color: var(--olive-600);
+}
+
+.yt-recent-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+.yt-recent-date {
+  color: var(--olive-300);
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 /* ─── Footer ─── */
