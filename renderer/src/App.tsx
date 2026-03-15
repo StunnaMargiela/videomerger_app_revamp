@@ -1178,6 +1178,9 @@ const App: React.FC = () => {
                           <video
                             key={`arrange-${previewVideoSrc}`}
                             className="preview-player"
+                            controls
+                            controlsList="nodownload noplaybackrate"
+                            disablePictureInPicture
                             autoPlay
                             preload="metadata"
                             src={previewVideoSrc}
@@ -1300,6 +1303,9 @@ const App: React.FC = () => {
                             <video
                               key={previewVideoSrc}
                               className="preview-player"
+                              controls
+                              controlsList="nodownload noplaybackrate"
+                              disablePictureInPicture
                               autoPlay
                               preload="metadata"
                               src={previewVideoSrc}

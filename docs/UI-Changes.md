@@ -176,3 +176,7 @@
 ### Google Icon Visual Refinement
 - Replaced the generic Google material glyph with a proper multicolor Google "G" logo in account/sign-in related UI locations.
 - Updated account tab icon rendering to use the same branded Google logo for visual consistency.
+
+### Preview Player Controls Restored
+- Restored native video controls (play/pause/progress bar) on Arrange and Finalize preview players.
+- Kept restricted options to avoid PiP/download behavior by setting `controlsList="nodownload noplaybackrate"` and `disablePictureInPicture`.
