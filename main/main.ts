@@ -108,7 +108,7 @@ function getBundledFFmpegPath(): string | null {
  */
 function getFFmpegSystemPath(): string | null {
   try {
-    const cmd = process.platform === 'win32' ? 'where ffmpeg' : 'which ffmpeg';
+    const cmd = process.platform === 'win32' ? 'where ffmpeg 2>nul' : 'which ffmpeg 2>/dev/null';
     const result = execSync(cmd, { encoding: 'utf-8' }).trim();
     return result.split('\n')[0].trim();
   } catch {
@@ -118,7 +118,7 @@ function getFFmpegSystemPath(): string | null {
 
 function getFFprobeSystemPath(): string | null {
   try {
-    const cmd = process.platform === 'win32' ? 'where ffprobe' : 'which ffprobe';
+    const cmd = process.platform === 'win32' ? 'where ffprobe 2>nul' : 'which ffprobe 2>/dev/null';
     const result = execSync(cmd, { encoding: 'utf-8' }).trim();
     return result.split('\n')[0].trim();
   } catch {
@@ -616,10 +616,13 @@ function setupIPC(): void {
 }
 
 app.whenReady().then(() => {
+  console.log('App ready, initializing...');
   registerLocalVideoProtocol();
   setupDependencies();
+  console.log('Dependencies setup, creating window...');
   createWindow();
   setupIPC();
+  console.log('IPC setup complete.');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

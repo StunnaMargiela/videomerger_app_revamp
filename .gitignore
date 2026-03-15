@@ -224,3 +224,4 @@ out/
 # Large Binaries
 *.zip
 *.7z
+resources/ffmpeg/
