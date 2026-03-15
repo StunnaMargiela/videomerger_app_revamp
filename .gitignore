@@ -226,3 +226,6 @@ out/
 *.7z
 resources/ffmpeg/
 resources/video_processor_cli.py
+# Keep icon files tracked (small enough for Git)
+!resources/icon.ico
+!resources/icon.png

@@ -62,16 +62,14 @@ export class VideoProcessingService implements IVideoProcessingService {
 
     try {
       const result = await this.strategy.process(options, (output) => {
-        // Basic parser for FFmpeg time progress output
-        // Example output: frame=  100 fps= 20 q=28.0 size=    2048kB time=00:00:10.00 bitrate=1677.7kbits/s speed=2.00x
-        const timeMatch = output.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
-        if (timeMatch) {
-          // You could parse the total duration of the inputs prior to merging to calculate exact percentage
-          // For MVP, we pass the raw time back or emit a generic progress event.
+        // Parse PROGRESS: <percentage> lines emitted by the Python CLI
+        const progressMatch = output.match(/PROGRESS:\s*(\d+)/);
+        if (progressMatch) {
+          const pct = Math.min(parseInt(progressMatch[1], 10), 100);
           this.emitEvent({
             type: 'progress',
-            message: `Processing: ${timeMatch[1]}`,
-            progress: 50 // arbitrary placeholder until total duration is known, UI just needs the event
+            message: `Processing: ${pct}%`,
+            progress: pct,
           });
         }
       });

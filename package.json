@@ -15,6 +15,7 @@
     "prepackage": "node -e \"const fs=require('fs'); if(!fs.existsSync('resources'))fs.mkdirSync('resources',{recursive:true}); fs.copyFileSync('src/videomerger/video_processor_cli.py', 'resources/video_processor_cli.py')\"",
     "package": "npm run build && npm run prepackage && electron-builder --win",
     "test": "vitest",
+    "test:core": "vitest --config vitest.core.config.ts",
     "lint": "eslint main/ renderer/ core/",
     "format": "prettier --write \"**/*.{ts,tsx}\""
   },
