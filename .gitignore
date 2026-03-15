@@ -220,3 +220,7 @@ out/
 
 # TypeScript
 *.tsbuildinfo
+
+# Large Binaries
+*.zip
+*.7z
