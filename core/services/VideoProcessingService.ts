@@ -61,15 +61,39 @@ export class VideoProcessingService implements IVideoProcessingService {
     });
 
     try {
+      let lastProgress = 0;
       const result = await this.strategy.process(options, (output) => {
-        // Parse PROGRESS: <percentage> lines emitted by the Python CLI
-        const progressMatch = output.match(/PROGRESS:\s*(\d+)/);
-        if (progressMatch) {
-          const pct = Math.min(parseInt(progressMatch[1], 10), 100);
+        // A single stream chunk may contain multiple PROGRESS markers.
+        // Parse all and keep the highest one observed in this chunk.
+        const progressMatches = Array.from(output.matchAll(/PROGRESS:\s*(\d{1,3})/gi));
+        if (progressMatches.length > 0) {
+          let highestInChunk = lastProgress;
+          for (const match of progressMatches) {
+            const parsed = Number.parseInt(match[1], 10);
+            if (!Number.isFinite(parsed)) continue;
+            const clamped = Math.max(0, Math.min(100, parsed));
+            if (clamped > highestInChunk) {
+              highestInChunk = clamped;
+            }
+          }
+
+          if (highestInChunk > lastProgress) {
+            lastProgress = highestInChunk;
+            this.emitEvent({
+              type: 'progress',
+              message: `Processing: ${lastProgress}%`,
+              progress: lastProgress,
+            });
+          }
+        }
+
+        // Keep useful processing status text flowing to the UI.
+        const infoMatch = output.match(/INFO:\s*(.+)/i);
+        if (infoMatch?.[1]) {
           this.emitEvent({
             type: 'progress',
-            message: `Processing: ${pct}%`,
-            progress: pct,
+            message: infoMatch[1].trim(),
+            progress: lastProgress,
           });
         }
       });

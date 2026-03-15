@@ -128,7 +128,7 @@ describe('App', () => {
       await goToStep2();
       
       const betaItem = screen.getByText('beta.mp4').closest('.sequence-item');
-      const upBtn = Array.from((betaItem as HTMLElement).querySelectorAll('button')).find(b => b.textContent === 'Up');
+      const upBtn = Array.from((betaItem as HTMLElement).querySelectorAll('button')).find(b => b.title === 'Move up');
       fireEvent.click(upBtn!);
       
       await waitFor(() => {
