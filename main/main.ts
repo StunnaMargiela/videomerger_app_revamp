@@ -729,14 +729,21 @@ function setupIPC(): void {
   // --- Google OAuth2 handlers ---
 
   ipcMain.handle('google-oauth-login', async () => {
+    console.log('[Auth][Main] google-oauth-login invoked');
     let config;
     try {
       config = getGoogleOAuthConfig();
     } catch (err: any) {
+      console.error('[Auth][Main] OAuth config error:', err?.message || err);
       return { success: false, error: err?.message || 'Google OAuth not configured.' };
     }
 
     return new Promise((resolve, reject) => {
+      console.log('[Auth][Main] Starting OAuth flow', {
+        redirectUri: config.redirectUri,
+        hasClientId: Boolean(config.clientId),
+        hasClientSecret: Boolean(config.clientSecret),
+      });
       const authUrl = `${config.authUrl}?` +
         `client_id=${encodeURIComponent(config.clientId)}` +
         `&redirect_uri=${encodeURIComponent(config.redirectUri)}` +
@@ -748,10 +755,12 @@ function setupIPC(): void {
       // Create a local HTTP server to catch the redirect
       const server = http.createServer(async (req, res) => {
         try {
+          console.log('[Auth][Main] OAuth callback received:', req.url || '/');
           const reqUrl = new url.URL(req.url || '', `http://localhost:8976`);
           const code = reqUrl.searchParams.get('code');
 
           if (code) {
+            console.log('[Auth][Main] Authorization code received; exchanging for tokens');
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end('<html><body><h2>Login successful! You can close this window.</h2><script>window.close();</script></body></html>');
 
@@ -781,6 +790,7 @@ function setupIPC(): void {
               },
             });
           } else {
+            console.error('[Auth][Main] OAuth callback without code');
             res.writeHead(400, { 'Content-Type': 'text/html' });
             res.end('<html><body><h2>Login failed. Please try again.</h2></body></html>');
             server.close();
@@ -788,6 +798,7 @@ function setupIPC(): void {
             resolve({ success: false, error: 'No authorization code received' });
           }
         } catch (err: any) {
+          console.error('[Auth][Main] OAuth callback handler error:', err?.message || err);
           res.writeHead(500, { 'Content-Type': 'text/html' });
           res.end('<html><body><h2>Login error. Please try again.</h2></body></html>');
           server.close();
@@ -797,7 +808,7 @@ function setupIPC(): void {
       });
 
       server.listen(8976, () => {
-        // Server ready, now open auth window
+        console.log('[Auth][Main] OAuth callback server listening on http://localhost:8976');
       });
 
       // Open OAuth2 popup
@@ -815,6 +826,7 @@ function setupIPC(): void {
 
       authWindow.loadURL(authUrl);
       authWindow.on('closed', () => {
+        console.log('[Auth][Main] OAuth window closed by user');
         authWindow = null;
         server.close();
       });

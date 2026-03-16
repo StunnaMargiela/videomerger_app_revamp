@@ -452,6 +452,7 @@ After a successful merge, logged-in users see a YouTube upload form:
 - When not logged in: YouTube config/upload features are disabled
 - Configure via environment variables (see `.env.example`): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (add `http://localhost:8976/oauth2callback` as an authorized redirect in Google Cloud).
  - The sign-in button advances the wizard only after a successful Google OAuth login; failed or canceled logins leave you on the current screen with an error status.
+- Debug tracing for login clicks and OAuth flow is available in devtools/terminal logs with `[Auth][Renderer]` and `[Auth][Main]` prefixes.
 
 ### Dashboard & Settings
 

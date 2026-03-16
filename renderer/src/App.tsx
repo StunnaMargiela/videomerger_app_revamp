@@ -437,10 +437,17 @@ const App: React.FC = () => {
     setAuthChecked(true);
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async (source: 'welcome' | 'dashboard' = 'welcome') => {
+    console.debug('[Auth][Renderer] Google sign-in clicked', { source, step, isLoggedIn });
     setStatus('');
     try {
       const result = await window.electronAPI.googleOAuthLogin();
+      console.debug('[Auth][Renderer] googleOAuthLogin result', {
+        source,
+        success: Boolean(result?.success),
+        hasUser: Boolean(result?.user),
+        error: result?.error || null,
+      });
       if (result.success && result.user) {
         setIsLoggedIn(true);
         setGoogleUser(result.user);
@@ -448,12 +455,21 @@ const App: React.FC = () => {
         setStep((prev) => (prev === 0 ? 1 : prev));
         return true;
       }
-      setStatus('Google sign-in failed. Please try again.');
+      setStatus(result?.error ? `Google sign-in failed: ${result.error}` : 'Google sign-in failed. Please try again.');
       return false;
-    } catch (err) {
-      setStatus('Google sign-in failed. Check your internet connection and try again.');
+    } catch (err: any) {
+      console.error('[Auth][Renderer] googleOAuthLogin threw', err);
+      setStatus(err?.message ? `Google sign-in failed: ${err.message}` : 'Google sign-in failed. Check your internet connection and try again.');
       return false;
     }
+  };
+
+  const handleGoogleLoginFromWelcome = () => {
+    void handleGoogleLogin('welcome');
+  };
+
+  const handleGoogleLoginFromDashboard = () => {
+    void handleGoogleLogin('dashboard');
   };
 
   const handleSkipLogin = async () => {
@@ -1080,7 +1096,7 @@ const App: React.FC = () => {
                 Sign in with Google to enable YouTube uploads, or continue without an account.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <button className="btn btn-primary auth-btn" onClick={handleGoogleLogin}>
+                <button className="btn btn-primary auth-btn" onClick={handleGoogleLoginFromWelcome}>
                   <GoogleLogoIcon className="icon-inline" />
                   <span>Sign in with Google</span>
                 </button>
@@ -1126,7 +1142,7 @@ const App: React.FC = () => {
               onThemeChange={setAppTheme}
               onDefaultOutputDirChange={setDefaultOutputDir}
               onLogout={handleLogout}
-              onLogin={handleGoogleLogin}
+              onLogin={handleGoogleLoginFromDashboard}
             />
           </main>
         </div>
