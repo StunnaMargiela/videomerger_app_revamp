@@ -196,3 +196,28 @@
   - `<resources>/icon.(ico|png)`
   - `<resources>/resources/icon.(ico|png)`
 - Applied the same icon resolution to the Google OAuth popup window, so title-bar icon behavior matches the main app window.
+
+### Theme Selection Sync + Classic Theme
+- Fixed theme picker sync in Settings so the selected option reflects the live active theme instead of stale persisted fallback values.
+- Added a new `Classic` theme option and made it the default theme.
+- `Classic` uses the original visual direction (olive-dark surfaces with blue accents).
+- Preserved the other three selectable themes: `Olive Dark` (olive accents), `Midnight Blue`, and `Sand Light`.
+- Added a user preference tracker for theme selection that auto-persists:
+  - current theme,
+  - last theme change timestamp,
+  - total change count,
+  - recent theme history (up to 20 entries).
+
+### Renderer Icon Fallback Hardening
+- Replaced hardcoded absolute app logo paths in React UI (`/app-icon.svg`) with a reusable brand icon component using relative paths.
+- Added failover for in-app logo rendering: try `./app-icon.svg`, then fall back to `./icon.png` if SVG fails to resolve.
+- Added multiple favicon links in renderer HTML (`svg` + `png` + `shortcut icon`) using relative paths to improve compatibility in packaged `file://` runtime.
+
+### Broadened Input Format Support + Finalization Compatibility Summary
+- Expanded supported input extensions in both renderer filtering and native file picker configuration:
+  - `mp4`, `mov`, `avi`, `mkv`, `webm`, `m4v`, `mpg`, `mpeg`, `ts`, `m2ts`, `flv`, `wmv`, `3gp`, `ogv`, `vob`, `mxf`.
+- Enhanced arrange metadata IPC to include per-clip `width`, `height`, and `fps` via `ffprobe`.
+- Finalization now warns when mixed container extensions are detected, including why mixed formats can increase processing time and risk re-encoding differences.
+- Finalization merge preview now includes:
+  - target resolution and target FPS summary,
+  - collapsible source clip breakdown grouped by resolution and FPS with occurrence counts.

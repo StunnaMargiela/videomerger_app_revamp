@@ -7,17 +7,17 @@
   --olive-600: #4a5148;
   --olive-300: #b3b9ad;
   --olive-200: #d8ddd2;
-  --blue-500: #86b358;
-  --blue-400: #a4cc76;
-  --accent-rgb: 164, 204, 118;
-  --accent-contrast: #13200f;
-  --accent-grad-start: #98c26a;
-  --accent-grad-end: #6f9a46;
+  --blue-500: #2f90f5;
+  --blue-400: #4ba3ff;
+  --accent-rgb: 47, 144, 245;
+  --accent-contrast: #ffffff;
+  --accent-grad-start: #228af0;
+  --accent-grad-end: #1772cc;
   --green-500: #21c56d;
   --danger-500: #ff6a6a;
   --danger-text: #ffc0c0;
   --bg-text: #f2f4ee;
-  --bg-accent-1: rgba(164, 204, 118, 0.24);
+  --bg-accent-1: rgba(47, 144, 245, 0.24);
   --bg-accent-2: rgba(21, 33, 27, 0.7);
   --shell-bg-top: rgba(32, 36, 30, 0.9);
   --shell-bg-bottom: rgba(22, 25, 21, 0.9);
@@ -38,6 +38,16 @@
   --progress-track-bg: #2b3029;
   --player-shell-bg: rgba(7, 9, 7, 0.8);
   --player-canvas-bg: #000000;
+}
+
+:root[data-theme='olive-dark'] {
+  --blue-500: #86b358;
+  --blue-400: #a4cc76;
+  --accent-rgb: 164, 204, 118;
+  --accent-contrast: #13200f;
+  --accent-grad-start: #98c26a;
+  --accent-grad-end: #6f9a46;
+  --bg-accent-1: rgba(164, 204, 118, 0.24);
 }
 
 :root[data-theme='midnight-blue'] {

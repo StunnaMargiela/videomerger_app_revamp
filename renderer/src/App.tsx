@@ -12,6 +12,9 @@ declare global {
         duration: number | null;
         modifiedMs: number | null;
         size: number | null;
+        width: number | null;
+        height: number | null;
+        fps: number | null;
       }>>;
       mergeVideos: (options: any) => Promise<any>;
       checkFFmpeg: () => Promise<{ available: boolean; version: string }>;
@@ -54,7 +57,11 @@ declare global {
   }
 }
 
-const SUPPORTED_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
+const SUPPORTED_EXTENSIONS = [
+  'mp4', 'mov', 'avi', 'mkv', 'webm',
+  'm4v', 'mpg', 'mpeg', 'ts', 'm2ts',
+  'flv', 'wmv', '3gp', 'ogv', 'vob', 'mxf',
+];
 
 const RESOLUTION_OPTIONS = [
   { value: 'original', label: 'Original' },
@@ -76,6 +83,9 @@ interface ArrangeVideoMeta {
   duration: number | null;
   modifiedMs: number | null;
   size: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
 }
 
 interface YouTubeQuickPreset {
@@ -106,7 +116,17 @@ interface YouTubeRecentVideo {
   url?: string | null;
 }
 
-type AppTheme = 'olive-dark' | 'midnight-blue' | 'sand-light';
+type AppTheme = 'classic' | 'olive-dark' | 'midnight-blue' | 'sand-light';
+
+const APP_THEMES: AppTheme[] = ['classic', 'olive-dark', 'midnight-blue', 'sand-light'];
+
+const isAppTheme = (value: unknown): value is AppTheme => {
+  return typeof value === 'string' && APP_THEMES.includes(value as AppTheme);
+};
+
+const normalizeAppTheme = (value: unknown, fallback: AppTheme = 'classic'): AppTheme => {
+  return isAppTheme(value) ? value : fallback;
+};
 
 const GoogleLogoIcon: React.FC<{ className?: string }> = ({ className = '' }) => (
   <svg
@@ -134,6 +154,26 @@ const GoogleLogoIcon: React.FC<{ className?: string }> = ({ className = '' }) =>
     />
   </svg>
 );
+
+const APP_ICON_SVG = './app-icon.svg';
+const APP_ICON_PNG = './icon.png';
+
+const AppBrandLogo: React.FC = () => {
+  const [iconSrc, setIconSrc] = useState<string>(APP_ICON_SVG);
+
+  return (
+    <img
+      src={iconSrc}
+      alt="Video Merger icon"
+      className="brand-logo"
+      onError={() => {
+        if (iconSrc !== APP_ICON_PNG) {
+          setIconSrc(APP_ICON_PNG);
+        }
+      }}
+    />
+  );
+};
 
 const App: React.FC = () => {
   // Wizard state
@@ -175,8 +215,10 @@ const App: React.FC = () => {
   const [ytPresetName, setYtPresetName] = useState<string>('');
   const [ytQuickPresets, setYtQuickPresets] = useState<YouTubeQuickPreset[]>([]);
   const [selectedYtPresetName, setSelectedYtPresetName] = useState<string>('');
-  const [appTheme, setAppTheme] = useState<AppTheme>('olive-dark');
+  const [appTheme, setAppTheme] = useState<AppTheme>('classic');
   const [defaultOutputDir, setDefaultOutputDir] = useState<string>('');
+  const [settingsLoaded, setSettingsLoaded] = useState<boolean>(false);
+  const lastTrackedTheme = useRef<AppTheme | null>(null);
 
   // Arrange sort state
   const [sortBy, setSortBy] = useState<SortField>('none');
@@ -224,15 +266,15 @@ const App: React.FC = () => {
           setYtQuickPresets(presets.filter((p: any) => p && typeof p.name === 'string'));
         }
 
-        if (typeof settings?.appTheme === 'string') {
-          setAppTheme(settings.appTheme as AppTheme);
-        }
+        setAppTheme(normalizeAppTheme(settings?.appTheme, 'classic'));
 
         if (typeof settings?.defaultOutputDir === 'string') {
           setDefaultOutputDir(settings.defaultOutputDir);
         }
       } catch {
         // noop
+      } finally {
+        setSettingsLoaded(true);
       }
     };
     loadAppSettings();
@@ -241,6 +283,46 @@ const App: React.FC = () => {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', appTheme);
   }, [appTheme]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (lastTrackedTheme.current === appTheme) return;
+
+    lastTrackedTheme.current = appTheme;
+
+    const trackThemePreference = async () => {
+      try {
+        const currentSettings = await window.electronAPI.getSettings();
+        const existingTracker = currentSettings?.userPreferenceTracker || {};
+        const previousHistory = Array.isArray(existingTracker?.themeHistory)
+          ? existingTracker.themeHistory
+          : [];
+
+        const nextEntry = {
+          value: appTheme,
+          changedAt: new Date().toISOString(),
+        };
+
+        const nextHistory = [...previousHistory, nextEntry].slice(-20);
+
+        await window.electronAPI.saveSettings({
+          ...currentSettings,
+          appTheme,
+          userPreferenceTracker: {
+            ...existingTracker,
+            currentTheme: appTheme,
+            lastThemeChangedAt: nextEntry.changedAt,
+            themeChangeCount: Number(existingTracker?.themeChangeCount || 0) + 1,
+            themeHistory: nextHistory,
+          },
+        });
+      } catch {
+        // noop
+      }
+    };
+
+    trackThemePreference();
+  }, [appTheme, settingsLoaded]);
 
   const canProceedStep1 = selectedFiles.length >= 2;
   const canProceedStep2 = selectedFiles.length >= 2;
@@ -282,12 +364,18 @@ const App: React.FC = () => {
               duration: null,
               modifiedMs: null,
               size: typeof info?.size === 'number' ? info.size : null,
+              width: typeof info?.width === 'number' ? info.width : null,
+              height: typeof info?.height === 'number' ? info.height : null,
+              fps: typeof info?.fps === 'number' ? info.fps : null,
             } as ArrangeVideoMeta] as const;
           } catch {
             return [filePath, {
               duration: null,
               modifiedMs: null,
               size: null,
+              width: null,
+              height: null,
+              fps: null,
             } as ArrangeVideoMeta] as const;
           }
         }));
@@ -644,6 +732,97 @@ const App: React.FC = () => {
     return `${mb.toFixed(1)} MB`;
   };
 
+  const formatClipFps = (fps: number | null | undefined): string => {
+    if (fps === null || fps === undefined || !Number.isFinite(fps) || fps <= 0) return 'Unknown';
+    const rounded = Math.round(fps * 100) / 100;
+    return Number.isInteger(rounded) ? `${rounded}` : `${rounded.toFixed(2)}`;
+  };
+
+  const getExtension = (filePath: string): string => {
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    return ext;
+  };
+
+  const extensionGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const filePath of selectedFiles) {
+      const ext = getExtension(filePath) || 'unknown';
+      map.set(ext, (map.get(ext) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([ext, count]) => ({ ext, count }));
+  }, [selectedFiles]);
+
+  const hasMixedExtensions = extensionGroups.length > 1;
+
+  const resolutionGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const filePath of selectedFiles) {
+      const meta = arrangeVideoMeta[filePath];
+      const label = (meta?.width && meta?.height) ? `${meta.width}x${meta.height}` : 'Unknown';
+      map.set(label, (map.get(label) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([label, count]) => ({ label, count }));
+  }, [arrangeVideoMeta, selectedFiles]);
+
+  const fpsGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const filePath of selectedFiles) {
+      const meta = arrangeVideoMeta[filePath];
+      const label = `${formatClipFps(meta?.fps)} fps`;
+      map.set(label, (map.get(label) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([label, count]) => ({ label, count }));
+  }, [arrangeVideoMeta, selectedFiles]);
+
+  const mergeTargetSummary = useMemo(() => {
+    const selectedResolutionLabel =
+      RESOLUTION_OPTIONS.find((option) => option.value === standardization.resolution)?.label || 'Original';
+    const selectedFpsLabel =
+      FPS_OPTIONS.find((option) => option.value === standardization.fps)?.label || 'Original';
+
+    let targetResolution = selectedResolutionLabel;
+    let targetFpsLabel = selectedFpsLabel;
+
+    if (standardization.resolution === 'original') {
+      const validRes = selectedFiles
+        .map((filePath) => arrangeVideoMeta[filePath])
+        .filter((meta): meta is ArrangeVideoMeta => !!meta && !!meta.width && !!meta.height);
+
+      if (validRes.length > 0) {
+        let best = validRes[0];
+        for (const meta of validRes) {
+          const bestArea = (best.width || 0) * (best.height || 0);
+          const currentArea = (meta.width || 0) * (meta.height || 0);
+          if (currentArea > 0 && currentArea < bestArea) {
+            best = meta;
+          }
+        }
+        if (best.width && best.height) {
+          targetResolution = `${best.width}x${best.height}`;
+        }
+      } else {
+        targetResolution = 'Original (auto)';
+      }
+    }
+
+    if (standardization.fps === 'original') {
+      const validFps = selectedFiles
+        .map((filePath) => arrangeVideoMeta[filePath]?.fps)
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+
+      if (validFps.length > 0) {
+        targetFpsLabel = `${formatClipFps(Math.min(...validFps))} FPS`;
+      } else {
+        targetFpsLabel = 'Original (auto)';
+      }
+    }
+
+    return {
+      targetResolution,
+      targetFpsLabel,
+    };
+  }, [arrangeVideoMeta, selectedFiles, standardization.fps, standardization.resolution]);
+
   const buildDefaultOutputPath = (): string => {
     if (!defaultOutputDir) return '';
     const separator = defaultOutputDir.includes('\\') ? '\\' : '/';
@@ -878,7 +1057,7 @@ const App: React.FC = () => {
         <div className="wizard-shell">
           <header className="wizard-header" style={{ justifyContent: 'center' }}>
             <div className="brand">
-              <img src="/app-icon.svg" alt="Video Merger icon" className="brand-logo" />
+              <AppBrandLogo />
               <div>
                 <h1>VideoMerger</h1>
               </div>
@@ -913,7 +1092,7 @@ const App: React.FC = () => {
         <div className="wizard-shell">
           <header className="wizard-header">
             <div className="brand">
-              <img src="/app-icon.svg" alt="Video Merger icon" className="brand-logo" />
+              <AppBrandLogo />
               <div>
                 <h1>VideoMerger</h1>
                 <p>Dashboard &amp; Settings</p>
@@ -950,7 +1129,7 @@ const App: React.FC = () => {
       <div className="wizard-shell">
         <header className="wizard-header">
           <div className="brand">
-            <img src="/app-icon.svg" alt="Video Merger icon" className="brand-logo" />
+            <AppBrandLogo />
             <div>
               <h1>VideoMerger</h1>
             </div>
@@ -1105,7 +1284,7 @@ const App: React.FC = () => {
                   >
                     <span className="dropzone-icon">{isDragOver ? '📂' : '+'}</span>
                     <span className="dropzone-title">{isDragOver ? 'Drop videos here' : 'Click or drag videos here'}</span>
-                    <span className="dropzone-subtitle">MP4, MOV, AVI, MKV, WEBM supported</span>
+                    <span className="dropzone-subtitle">MP4, MOV, AVI, MKV, WEBM, M4V, MPG, MPEG, TS, M2TS, FLV, WMV, 3GP, OGV, VOB, MXF supported</span>
                   </div>
 
                   <div className="file-grid">
@@ -1363,10 +1542,32 @@ const App: React.FC = () => {
                       <div className="preview-block">
                         <h3>Merge preview</h3>
                         <div className="preview-meta">
-                          <span>Resolution:</span><span>{resolutionLabel}</span>
-                          <span>Frame Rate:</span><span>{fpsLabel}</span>
+                          <span>Target Resolution:</span><span>{mergeTargetSummary.targetResolution}</span>
+                          <span>Target Frame Rate:</span><span>{mergeTargetSummary.targetFpsLabel}</span>
                           <span>Clips:</span><span>{selectedFiles.length}</span>
                         </div>
+
+                        {hasMixedExtensions && (
+                          <div className="upload-error" style={{ marginTop: 10 }}>
+                            <strong>Mixed container formats detected:</strong>{' '}
+                            {extensionGroups.map((entry) => `${entry.ext.toUpperCase()} (${entry.count})`).join(', ')}.
+                            <div style={{ marginTop: 6 }}>
+                              FFmpeg will normalize them first, but this can increase processing time and may introduce re-encoding differences
+                              because source containers/codecs can use different timing, color metadata, and audio layouts.
+                            </div>
+                          </div>
+                        )}
+
+                        <details className="merge-summary-details" style={{ marginTop: 10 }}>
+                          <summary className="merge-summary-toggle">Source clip breakdown</summary>
+                          <div className="preview-meta" style={{ marginTop: 8 }}>
+                            <span>Resolutions:</span>
+                            <span>{resolutionGroups.map((entry) => `${entry.label} (${entry.count})`).join(', ')}</span>
+                            <span>Frame Rates:</span>
+                            <span>{fpsGroups.map((entry) => `${entry.label} (${entry.count})`).join(', ')}</span>
+                          </div>
+                        </details>
+
                         {isLoggedIn && (
                           <p style={{ margin: '10px 0 0', color: 'var(--olive-200)' }}>
                             <GoogleLogoIcon className="icon-inline" />
@@ -1665,7 +1866,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     await window.electronAPI.saveSettings({ ...settings, ytQuickPresets });
-    onThemeChange((settings.appTheme || 'olive-dark') as AppTheme);
+    onThemeChange(normalizeAppTheme(settings.appTheme, appTheme));
     onDefaultOutputDirChange(settings.defaultOutputDir || '');
     onStandardizationChange({
       resolution: settings.defaultResolution || 'original',
@@ -1787,13 +1988,14 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
               Theme
               <select
                 className="std-select"
-                value={settings.appTheme || 'olive-dark'}
+                value={appTheme}
                 onChange={e => {
                   const nextTheme = e.target.value as AppTheme;
-                  setSettings({ ...settings, appTheme: nextTheme });
+                  setSettings((prev: any) => ({ ...prev, appTheme: nextTheme }));
                   onThemeChange(nextTheme);
                 }}
               >
+                <option value="classic">Classic</option>
                 <option value="olive-dark">Olive Dark</option>
                 <option value="midnight-blue">Midnight Blue</option>
                 <option value="sand-light">Sand Light</option>
