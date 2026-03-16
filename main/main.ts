@@ -141,6 +141,21 @@ function getBundledFFprobePath(): string | null {
   return null;
 }
 
+function resolveAppIconPath(): string | undefined {
+  const ext = process.platform === 'win32' ? '.ico' : '.png';
+  const fallbackExt = process.platform === 'win32' ? '.png' : '.ico';
+  const candidates = [
+    path.join(process.resourcesPath || '', `icon${ext}`),
+    path.join(process.resourcesPath || '', `icon${fallbackExt}`),
+    path.join(process.resourcesPath || '', 'resources', `icon${ext}`),
+    path.join(process.resourcesPath || '', 'resources', `icon${fallbackExt}`),
+    path.join(__dirname, '../../resources', `icon${ext}`),
+    path.join(__dirname, '../../resources', `icon${fallbackExt}`),
+  ];
+
+  return candidates.find((candidate) => !!candidate && fs.existsSync(candidate));
+}
+
 function getVideoDurationSeconds(filePath: string): Promise<number | null> {
   return new Promise((resolve) => {
     const ffprobePath = getBundledFFprobePath() || getFFprobeSystemPath() || 'ffprobe';
@@ -164,6 +179,56 @@ function getVideoDurationSeconds(filePath: string): Promise<number | null> {
           return;
         }
         resolve(null);
+      }
+    );
+  });
+}
+
+function getVideoStreamInfo(filePath: string): Promise<{
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+}> {
+  return new Promise((resolve) => {
+    const ffprobePath = getBundledFFprobePath() || getFFprobeSystemPath() || 'ffprobe';
+    execFile(
+      ffprobePath,
+      [
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height,r_frame_rate',
+        '-of', 'json',
+        filePath,
+      ],
+      { timeout: 15000 },
+      (error, stdout) => {
+        if (error) {
+          resolve({ width: null, height: null, fps: null });
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(stdout || '{}');
+          const stream = Array.isArray(parsed?.streams) ? parsed.streams[0] : null;
+          const width = Number.isFinite(Number(stream?.width)) ? Number(stream.width) : null;
+          const height = Number.isFinite(Number(stream?.height)) ? Number(stream.height) : null;
+
+          let fps: number | null = null;
+          const rate = typeof stream?.r_frame_rate === 'string' ? stream.r_frame_rate : '';
+          if (rate.includes('/')) {
+            const [numStr, denStr] = rate.split('/');
+            const num = Number(numStr);
+            const den = Number(denStr);
+            if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+              const value = num / den;
+              fps = Number.isFinite(value) ? value : null;
+            }
+          }
+
+          resolve({ width, height, fps });
+        } catch {
+          resolve({ width: null, height: null, fps: null });
+        }
       }
     );
   });
@@ -199,7 +264,11 @@ function getAppConfig(): IAppConfig {
   return {
     pythonPath: 'python',
     pythonScriptPath,
-    supportedFormats: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
+    supportedFormats: [
+      'mp4', 'mov', 'avi', 'mkv', 'webm',
+      'm4v', 'mpg', 'mpeg', 'ts', 'm2ts',
+      'flv', 'wmv', '3gp', 'ogv', 'vob', 'mxf',
+    ],
     maxFileSizeMb: store.get('maxFileSizeMb', 500) as number,
     ...(bundledPath ? { ffmpegPath: bundledPath } : {}),
   };
@@ -242,6 +311,8 @@ function setupDependencies(): void {
  * Create the main application window
  */
 function createWindow(): void {
+  const appIconPath = resolveAppIconPath();
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -253,9 +324,7 @@ function createWindow(): void {
     },
     title: 'Video Merger',
     backgroundColor: '#1e1e1e',
-    icon: process.env.NODE_ENV === 'development'
-      ? path.join(__dirname, '../../resources/icon.png')
-      : path.join(process.resourcesPath, 'icon.png'),
+    icon: appIconPath,
   });
 
   mainWindow.setMenuBarVisibility(false);
@@ -559,18 +628,27 @@ function setupIPC(): void {
     const uniquePaths = Array.from(new Set((paths || []).filter(Boolean)));
     const entries = await Promise.all(uniquePaths.map(async (filePath) => {
       try {
-        const stats = await fs.promises.stat(filePath);
-        const duration = await getVideoDurationSeconds(filePath);
+        const [stats, duration, streamInfo] = await Promise.all([
+          fs.promises.stat(filePath),
+          getVideoDurationSeconds(filePath),
+          getVideoStreamInfo(filePath),
+        ]);
         return [filePath, {
           duration,
           modifiedMs: stats.mtimeMs,
           size: stats.size,
+          width: streamInfo.width,
+          height: streamInfo.height,
+          fps: streamInfo.fps,
         }];
       } catch {
         return [filePath, {
           duration: null,
           modifiedMs: null,
           size: null,
+          width: null,
+          height: null,
+          fps: null,
         }];
       }
     }));
@@ -733,6 +811,7 @@ function setupIPC(): void {
         parent: mainWindow || undefined,
         modal: true,
         autoHideMenuBar: true,
+        icon: resolveAppIconPath(),
         webPreferences: { nodeIntegration: false, contextIsolation: true },
       });
 
