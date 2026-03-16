@@ -286,6 +286,11 @@ logger.error('Error message')
 
 > **Note:** You must have **Docker Desktop** installed and running to use these features on Windows. If you are on Linux or macOS, the standard **Docker** engine setup is sufficient.
 
+### FFmpeg bundling (desktop build)
+
+- Place the `ffmpeg.zip` archive in the repository root **before** running any packaging or the `builder` Compose service. The build scripts unzip it and copy the binaries into `resources/ffmpeg/` so FFmpeg is shipped inside the app. Without `ffmpeg.zip` at the root, packaged builds will miss FFmpeg and video processing will fail.
+- What goes in `ffmpeg.zip`: a Windows static FFmpeg bundle containing `ffmpeg.exe`, `ffprobe.exe` (and optionally `ffplay.exe`) plus the matching DLLs from the same build. The standard layout from [gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/) "ffmpeg-release-essentials" works unchanged; keep the zip intact in the repo root and the build will pick up `ffmpeg/bin/*.exe` automatically.
+
 ### Building the Desktop Application Executable (Windows/No-Node)
 
 If you need to build the Windows `.exe` standalone application but don't have Node.js installed locally, use the Docker Builder service (which runs `electron-builder` under Wine):

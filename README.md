@@ -57,6 +57,7 @@ A professional desktop solution for merging multiple video files with ease. Feat
    # OR use Docker for a clean environment-free build:
    docker compose run builder
    ```
+  - Ensure `ffmpeg.zip` is present in the repository root before packaging; the build unzips it and embeds FFmpeg into `resources/ffmpeg/` so the packaged app can run FFmpeg without a system install. Use a Windows static FFmpeg zip (e.g., [gyan.dev "ffmpeg-release-essentials"](https://www.gyan.dev/ffmpeg/builds/)) containing `ffmpeg.exe`, `ffprobe.exe` (ffplay optional) and its DLLs; keep the zip structure unchanged so the build can find `ffmpeg/bin/*.exe`.
 
 ## 🐳 Docker Development & Deployment
 
