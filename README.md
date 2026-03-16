@@ -69,13 +69,6 @@ docker compose run --rm builder
 ```
 Output located in: `dist-bin/`
 
-### isolated Development Environment
-Run the live development environment (Vite + Electron) inside a container:
-```bash
-docker compose run --rm -p 3000:3000 dev-desktop
-```
-*(Note: requires an X-Server like VcXsrv to see the GUI popup)*
-
 ## 🏗️ Architecture & Project Structure
 
 ### Desktop Application Architecture
