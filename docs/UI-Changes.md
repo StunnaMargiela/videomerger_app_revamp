@@ -218,6 +218,43 @@
   - `mp4`, `mov`, `avi`, `mkv`, `webm`, `m4v`, `mpg`, `mpeg`, `ts`, `m2ts`, `flv`, `wmv`, `3gp`, `ogv`, `vob`, `mxf`.
 - Enhanced arrange metadata IPC to include per-clip `width`, `height`, and `fps` via `ffprobe`.
 - Finalization now warns when mixed container extensions are detected, including why mixed formats can increase processing time and risk re-encoding differences.
+
+## 2026-03-16
+
+### YouTube Preset Schema Expansion (Finalize + Settings)
+- Expanded YouTube defaults/presets beyond title/description/privacy to cover most upload metadata:
+  - category, tags, language, made-for-kids, notify-subscribers, license, embeddable, and public-stats visibility.
+- Finalize quick-upload panel now exposes these fields so upload metadata and preset values stay aligned.
+- Settings → YouTube now includes the same expanded default field set for parity and easier baseline tuning.
+
+### Online Preset Controls in Settings
+- Added `Save Online Presets` and `Load Online Presets` actions in Settings → YouTube.
+- Added inline sync status messaging (saving/loading/failed/last-updated) to clarify online preset state.
+- Online sync buttons are enabled only while authenticated and not busy.
+
+### Firebase Migration Guide Added
+- Added a dedicated Firebase guide markdown with:
+  - proposed Firestore schema,
+  - account mapping strategy,
+  - starter security rules,
+  - save/load flow,
+  - migration path from local store to cloud.
 - Finalization merge preview now includes:
   - target resolution and target FPS summary,
   - collapsible source clip breakdown grouped by resolution and FPS with occurrence counts.
+
+### Preview Playback Consistency Stabilization
+- Improved Arrange and Finalize preview reliability for repeated selections and duplicate clips.
+- Updated player remount keys to include clip index so selecting the same source path in another slot reliably refreshes playback.
+- Added guarded replay trigger on preview selection changes (`currentTime` reset + safe `play()` retry).
+- Added preview error status message to surface non-playable stream/layout cases instead of failing silently.
+
+### Rapid-Cycling Preview Stability
+- Hardened rapid clip switching behavior in Arrange/Finalize preview panes.
+- Introduced a dedicated preview-selection handler that pauses current players before switching and forces a fresh reload token per selection.
+- Added an interrupted-playback retry path (`load()` + delayed `play()` retry) for fast source changes where the browser aborts decode/start.
+- Added cleanup for pending retry timers on unmount to avoid stale playback actions.
+
+### Preview Transport Stability (Range Requests)
+- Strengthened local preview transport handling by ensuring byte-range requests are preserved when serving `local-video://` media.
+- This improves playback consistency during fast switching and seek-heavy usage where the video element relies on partial content fetches.
