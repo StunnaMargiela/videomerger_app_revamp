@@ -24,11 +24,11 @@ import {
 let mainWindow: BrowserWindow | null = null;
 const store = new Store();
 
-// Google OAuth2 configuration
-const GOOGLE_OAUTH_CONFIG = {
-  clientId: '133055670342-8u9o8ubglh1qqgnpheptqhimj5kl4ddn.apps.googleusercontent.com',
-  clientSecret: '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',
-  redirectUri: 'http://localhost:8976/oauth2callback',
+// Google OAuth2 configuration (read from environment at runtime; no secrets in code)
+const getGoogleOAuthConfig = () => ({
+  clientId: process.env.GOOGLE_CLIENT_ID || '',
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+  redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:8976/oauth2callback',
   authUrl: 'https://accounts.google.com/o/oauth2/auth',
   tokenUrl: 'https://oauth2.googleapis.com/token',
   scopes: [
@@ -37,7 +37,7 @@ const GOOGLE_OAUTH_CONFIG = {
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email',
   ],
-};
+});
 
 if (
   process.platform === 'win32' &&
@@ -288,16 +288,21 @@ class IPCProcessingObserver implements IProcessingObserver {
  * Perform Google OAuth2 token exchange
  */
 function exchangeCodeForTokens(code: string): Promise<any> {
+  const config = getGoogleOAuthConfig();
+  if (!config.clientId || !config.clientSecret || !config.redirectUri) {
+    return Promise.reject(new Error('Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.'));
+  }
+
   return new Promise((resolve, reject) => {
     const postData = new url.URLSearchParams({
       code,
-      client_id: GOOGLE_OAUTH_CONFIG.clientId,
-      client_secret: GOOGLE_OAUTH_CONFIG.clientSecret,
-      redirect_uri: GOOGLE_OAUTH_CONFIG.redirectUri,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      redirect_uri: config.redirectUri,
       grant_type: 'authorization_code',
     }).toString();
 
-    const req = https.request(GOOGLE_OAUTH_CONFIG.tokenUrl, {
+    const req = https.request(config.tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -662,12 +667,17 @@ function setupIPC(): void {
   // --- Google OAuth2 handlers ---
 
   ipcMain.handle('google-oauth-login', async () => {
+    const config = getGoogleOAuthConfig();
+    if (!config.clientId || !config.clientSecret || !config.redirectUri) {
+      return { success: false, error: 'Google OAuth not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.' };
+    }
+
     return new Promise((resolve, reject) => {
-      const authUrl = `${GOOGLE_OAUTH_CONFIG.authUrl}?` +
-        `client_id=${encodeURIComponent(GOOGLE_OAUTH_CONFIG.clientId)}` +
-        `&redirect_uri=${encodeURIComponent(GOOGLE_OAUTH_CONFIG.redirectUri)}` +
+      const authUrl = `${config.authUrl}?` +
+        `client_id=${encodeURIComponent(config.clientId)}` +
+        `&redirect_uri=${encodeURIComponent(config.redirectUri)}` +
         `&response_type=code` +
-        `&scope=${encodeURIComponent(GOOGLE_OAUTH_CONFIG.scopes.join(' '))}` +
+        `&scope=${encodeURIComponent(config.scopes.join(' '))}` +
         `&access_type=offline` +
         `&prompt=consent`;
 
