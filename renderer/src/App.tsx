@@ -438,12 +438,22 @@ const App: React.FC = () => {
   };
 
   const handleGoogleLogin = async () => {
-    const result = await window.electronAPI.googleOAuthLogin();
-    if (result.success && result.user) {
-      setIsLoggedIn(true);
-      setGoogleUser(result.user);
+    setStatus('');
+    try {
+      const result = await window.electronAPI.googleOAuthLogin();
+      if (result.success && result.user) {
+        setIsLoggedIn(true);
+        setGoogleUser(result.user);
+        // Advance only if the user is on the welcome screen; keep dashboard open otherwise.
+        setStep((prev) => (prev === 0 ? 1 : prev));
+        return true;
+      }
+      setStatus('Google sign-in failed. Please try again.');
+      return false;
+    } catch (err) {
+      setStatus('Google sign-in failed. Check your internet connection and try again.');
+      return false;
     }
-    setStep(1);
   };
 
   const handleSkipLogin = async () => {
