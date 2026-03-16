@@ -258,3 +258,13 @@
 ### Preview Transport Stability (Range Requests)
 - Strengthened local preview transport handling by ensuring byte-range requests are preserved when serving `local-video://` media.
 - This improves playback consistency during fast switching and seek-heavy usage where the video element relies on partial content fetches.
+
+### YouTube Preset Carry-Over Fix (Settings -> Finalize)
+- Fixed YouTube quick presets and defaults edited in Settings not propagating to Finalize quick setup during the same app session.
+- Dashboard now emits YouTube defaults/preset sync updates so Finalize fields and preset list refresh immediately.
+- Loading online presets from Settings now also writes to local settings storage, so reopening Finalize keeps the same loaded defaults/presets.
+
+### YouTube Checkbox Visual Polish
+- Refined YouTube toggle checkboxes in both Finalize quick setup and Settings to a circular minimalist style.
+- Replaced ad-hoc inline checkbox layout with reusable toggle row classes for cleaner, consistent spacing.
+- Added focus and checked-state visuals aligned with active theme accent colors.
