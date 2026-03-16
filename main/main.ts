@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -13,6 +14,7 @@ import { FileSystemVideoRepository } from '../core/repositories/FileSystemVideoR
 import { FFmpegProcessingStrategy } from '../core/strategies/VideoProcessingStrategies';
 import { VideoProcessingService } from '../core/services/VideoProcessingService';
 import { MergeVideosCommand } from '../core/commands/MergeVideosCommand';
+import { getGoogleOAuthConfig } from './oauthConfig';
 import {
   IVideoProcessingService,
   IVideoMergeOptions,
@@ -23,21 +25,6 @@ import {
 
 let mainWindow: BrowserWindow | null = null;
 const store = new Store();
-
-// Google OAuth2 configuration (read from environment at runtime; no secrets in code)
-const getGoogleOAuthConfig = () => ({
-  clientId: process.env.GOOGLE_CLIENT_ID || '',
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-  redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:8976/oauth2callback',
-  authUrl: 'https://accounts.google.com/o/oauth2/auth',
-  tokenUrl: 'https://oauth2.googleapis.com/token',
-  scopes: [
-    'https://www.googleapis.com/auth/youtube.upload',
-    'https://www.googleapis.com/auth/youtube.readonly',
-    'https://www.googleapis.com/auth/userinfo.profile',
-    'https://www.googleapis.com/auth/userinfo.email',
-  ],
-});
 
 if (
   process.platform === 'win32' &&
@@ -358,9 +345,6 @@ class IPCProcessingObserver implements IProcessingObserver {
  */
 function exchangeCodeForTokens(code: string): Promise<any> {
   const config = getGoogleOAuthConfig();
-  if (!config.clientId || !config.clientSecret || !config.redirectUri) {
-    return Promise.reject(new Error('Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.'));
-  }
 
   return new Promise((resolve, reject) => {
     const postData = new url.URLSearchParams({
@@ -745,9 +729,11 @@ function setupIPC(): void {
   // --- Google OAuth2 handlers ---
 
   ipcMain.handle('google-oauth-login', async () => {
-    const config = getGoogleOAuthConfig();
-    if (!config.clientId || !config.clientSecret || !config.redirectUri) {
-      return { success: false, error: 'Google OAuth not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.' };
+    let config;
+    try {
+      config = getGoogleOAuthConfig();
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Google OAuth not configured.' };
     }
 
     return new Promise((resolve, reject) => {

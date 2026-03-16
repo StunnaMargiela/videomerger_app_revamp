@@ -450,6 +450,7 @@ After a successful merge, logged-in users see a YouTube upload form:
 - Opens native OAuth popup (Electron BrowserWindow) → local HTTP redirect callback
 - Tokens stored in `electron-store`
 - When not logged in: YouTube config/upload features are disabled
+- Configure via environment variables (see `.env.example`): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (add `http://localhost:8976/oauth2callback` as an authorized redirect in Google Cloud).
 
 ### Dashboard & Settings
 
