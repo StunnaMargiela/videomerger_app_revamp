@@ -141,6 +141,21 @@ function getBundledFFprobePath(): string | null {
   return null;
 }
 
+function resolveAppIconPath(): string | undefined {
+  const ext = process.platform === 'win32' ? '.ico' : '.png';
+  const fallbackExt = process.platform === 'win32' ? '.png' : '.ico';
+  const candidates = [
+    path.join(process.resourcesPath || '', `icon${ext}`),
+    path.join(process.resourcesPath || '', `icon${fallbackExt}`),
+    path.join(process.resourcesPath || '', 'resources', `icon${ext}`),
+    path.join(process.resourcesPath || '', 'resources', `icon${fallbackExt}`),
+    path.join(__dirname, '../../resources', `icon${ext}`),
+    path.join(__dirname, '../../resources', `icon${fallbackExt}`),
+  ];
+
+  return candidates.find((candidate) => !!candidate && fs.existsSync(candidate));
+}
+
 function getVideoDurationSeconds(filePath: string): Promise<number | null> {
   return new Promise((resolve) => {
     const ffprobePath = getBundledFFprobePath() || getFFprobeSystemPath() || 'ffprobe';
@@ -242,6 +257,8 @@ function setupDependencies(): void {
  * Create the main application window
  */
 function createWindow(): void {
+  const appIconPath = resolveAppIconPath();
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -253,9 +270,7 @@ function createWindow(): void {
     },
     title: 'Video Merger',
     backgroundColor: '#1e1e1e',
-    icon: process.env.NODE_ENV === 'development'
-      ? path.join(__dirname, '../../resources/icon.png')
-      : path.join(process.resourcesPath, 'icon.png'),
+    icon: appIconPath,
   });
 
   mainWindow.setMenuBarVisibility(false);
@@ -733,6 +748,7 @@ function setupIPC(): void {
         parent: mainWindow || undefined,
         modal: true,
         autoHideMenuBar: true,
+        icon: resolveAppIconPath(),
         webPreferences: { nodeIntegration: false, contextIsolation: true },
       });
 
