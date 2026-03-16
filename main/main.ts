@@ -253,6 +253,12 @@ function createWindow(): void {
     },
     title: 'Video Merger',
     backgroundColor: '#1e1e1e',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: 'rgba(0, 0, 0, 0)',
+      symbolColor: '#b3b9ad',
+      height: 40
+    },
     icon: process.env.NODE_ENV === 'development'
       ? path.join(__dirname, '../../resources/icon.png')
       : path.join(process.resourcesPath, 'icon.png'),
