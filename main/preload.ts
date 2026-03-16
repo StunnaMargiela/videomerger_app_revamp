@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getGoogleAuthStatus: () => ipcRenderer.invoke('google-auth-status'),
   getYouTubeAccountSummary: () => ipcRenderer.invoke('youtube-account-summary'),
   uploadToYouTube: (options: any) => ipcRenderer.invoke('upload-to-youtube', options),
+  saveYouTubeOnlinePresets: (payload: { defaults: Record<string, any>; presets: Array<Record<string, any>> }) =>
+    ipcRenderer.invoke('youtube-online-presets-save', payload),
+  loadYouTubeOnlinePresets: () => ipcRenderer.invoke('youtube-online-presets-load'),
   onProcessingEvent: (callback: (event: any) => void) => {
     ipcRenderer.on('processing-event', (_event, data) => callback(data));
   },

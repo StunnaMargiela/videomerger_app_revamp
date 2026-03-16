@@ -62,6 +62,16 @@ function registerLocalVideoProtocol(): void {
       }
 
       const fileUrl = url.pathToFileURL(filePath).toString();
+      // Forward byte-range requests so HTML5 video seeking/switching remains stable.
+      const rangeHeader = request.headers.get('range');
+      if (rangeHeader) {
+        return net.fetch(fileUrl, {
+          headers: {
+            range: rangeHeader,
+          },
+        });
+      }
+
       return net.fetch(fileUrl);
     } catch {
       return new Response('Invalid local video request', { status: 400 });
@@ -494,19 +504,47 @@ function uploadVideoToYouTube(
   filePath: string,
   title: string,
   description: string,
-  privacy: string
+  privacy: string,
+  options?: {
+    categoryId?: string;
+    tags?: string[];
+    defaultLanguage?: string;
+    madeForKids?: boolean;
+    notifySubscribers?: boolean;
+    license?: 'youtube' | 'creativeCommon';
+    embeddable?: boolean;
+    publicStatsViewable?: boolean;
+  }
 ): Promise<any> {
   return new Promise((resolve, reject) => {
     const fileSize = fs.statSync(filePath).size;
+    const categoryId = (options?.categoryId || '22').trim() || '22';
+    const tags = Array.isArray(options?.tags) ? options.tags.filter((tag) => typeof tag === 'string' && tag.trim()) : [];
+    const defaultLanguage = typeof options?.defaultLanguage === 'string' ? options.defaultLanguage.trim() : '';
+    const notifySubscribers = options?.notifySubscribers !== false;
     const metadata = JSON.stringify({
-      snippet: { title, description, categoryId: '22' },
-      status: { privacyStatus: privacy },
+      snippet: {
+        title,
+        description,
+        categoryId,
+        ...(tags.length > 0 ? { tags } : {}),
+        ...(defaultLanguage ? { defaultLanguage } : {}),
+      },
+      status: {
+        privacyStatus: privacy,
+        ...(typeof options?.madeForKids === 'boolean' ? { selfDeclaredMadeForKids: options.madeForKids } : {}),
+        ...(options?.license ? { license: options.license } : {}),
+        ...(typeof options?.embeddable === 'boolean' ? { embeddable: options.embeddable } : {}),
+        ...(typeof options?.publicStatsViewable === 'boolean' ? { publicStatsViewable: options.publicStatsViewable } : {}),
+      },
     });
+
+    const notifySubscribersParam = notifySubscribers ? 'true' : 'false';
 
     // Step 1: Initiate resumable upload
     const initReq = https.request({
       hostname: 'www.googleapis.com',
-      path: '/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+      path: `/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status&notifySubscribers=${notifySubscribersParam}`,
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -855,6 +893,14 @@ function setupIPC(): void {
     title: string;
     description?: string;
     privacy?: string;
+    categoryId?: string;
+    tags?: string[];
+    defaultLanguage?: string;
+    madeForKids?: boolean;
+    notifySubscribers?: boolean;
+    license?: 'youtube' | 'creativeCommon';
+    embeddable?: boolean;
+    publicStatsViewable?: boolean;
   }) => {
     const auth = store.get('googleAuth') as any;
     if (!auth || !auth.accessToken) {
@@ -867,7 +913,17 @@ function setupIPC(): void {
         options.filePath,
         options.title,
         options.description || '',
-        options.privacy || 'private'
+        options.privacy || 'private',
+        {
+          categoryId: options.categoryId,
+          tags: options.tags,
+          defaultLanguage: options.defaultLanguage,
+          madeForKids: options.madeForKids,
+          notifySubscribers: options.notifySubscribers,
+          license: options.license,
+          embeddable: options.embeddable,
+          publicStatsViewable: options.publicStatsViewable,
+        }
       );
       return result;
     } catch (err: any) {
@@ -892,6 +948,53 @@ function setupIPC(): void {
         : rawMessage;
       return { success: false, error: friendlyMessage, needsReauth };
     }
+  });
+
+  ipcMain.handle('youtube-online-presets-save', async (event, payload: {
+    defaults: Record<string, any>;
+    presets: Array<Record<string, any>>;
+  }) => {
+    const auth = store.get('googleAuth') as any;
+    const userEmail = String(auth?.user?.email || '').trim().toLowerCase();
+    if (!auth || !auth.accessToken || !userEmail) {
+      return { success: false, error: 'Not authenticated with Google' };
+    }
+
+    const existing = (store.get('youtubeOnlinePresetsByUser') as Record<string, any>) || {};
+    existing[userEmail] = {
+      userEmail,
+      updatedAt: new Date().toISOString(),
+      defaults: payload?.defaults || {},
+      presets: Array.isArray(payload?.presets) ? payload.presets : [],
+    };
+    store.set('youtubeOnlinePresetsByUser', existing);
+    return { success: true, updatedAt: existing[userEmail].updatedAt };
+  });
+
+  ipcMain.handle('youtube-online-presets-load', async () => {
+    const auth = store.get('googleAuth') as any;
+    const userEmail = String(auth?.user?.email || '').trim().toLowerCase();
+    if (!auth || !auth.accessToken || !userEmail) {
+      return { success: false, error: 'Not authenticated with Google' };
+    }
+
+    const existing = (store.get('youtubeOnlinePresetsByUser') as Record<string, any>) || {};
+    const accountData = existing[userEmail];
+    if (!accountData) {
+      return {
+        success: true,
+        defaults: {},
+        presets: [],
+        updatedAt: null,
+      };
+    }
+
+    return {
+      success: true,
+      defaults: accountData.defaults || {},
+      presets: Array.isArray(accountData.presets) ? accountData.presets : [],
+      updatedAt: accountData.updatedAt || null,
+    };
   });
 }
 
