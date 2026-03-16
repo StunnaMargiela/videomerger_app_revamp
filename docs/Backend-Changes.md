@@ -57,3 +57,49 @@
 - Added unbuffered Python execution (`python -u`) in adapter to flush progress logs immediately.
 - Updated service parser to handle multiple `PROGRESS:` tokens in a single stream chunk and emit the highest observed value.
 - Result: reduced chunking/buffering artifacts that made progress appear to jump directly from 0 to completion.
+
+### Preview Playback Consistency Stabilization
+- Scope: intermittent in-app preview playback reliability in Arrange/Finalize.
+- Backend impact: None.
+- Reason: fix implemented in renderer video element lifecycle/keys and playback retry handling; no IPC/service/CLI changes required.
+
+### Rapid-Cycling Preview Stability
+- Scope: playback dropping/stalling after very fast clip switching in preview lists.
+- Backend impact: None.
+- Reason: handled entirely in renderer with player pause/reload/retry sequencing and selection-state handling.
+
+### Local Video Protocol Range Forwarding
+- Scope: intermittent preview stalls after rapid clip cycling/seek behavior.
+- Backend impact: Electron main-process protocol handler update.
+- Change: forwarded `Range` request header in `local-video` custom protocol to underlying file fetch.
+- Reason: HTML5 video playback frequently depends on partial-content byte-range requests for stable load/start/seek behavior.
+
+## 2026-03-16
+
+### Richer YouTube Upload Metadata Support
+- Scope: Broaden YouTube preset coverage to almost all common upload metadata fields.
+- Backend impact:
+	- Extended `upload-to-youtube` IPC options in main process.
+	- Extended upload metadata payload to include category, tags, language, made-for-kids, license, embeddable, and public stats visibility.
+	- Added `notifySubscribers` support in resumable upload initialization query.
+- Reason: keep renderer preset/default schema aligned with actual YouTube upload options.
+
+### Account-Scoped Online Preset Foundation (Pre-Firebase)
+- Scope: Provide online preset save/load behavior tied to signed-in Google account before Firebase integration.
+- Backend impact:
+	- Added IPC handlers:
+		- `youtube-online-presets-save`
+		- `youtube-online-presets-load`
+	- Added account-scoped storage map in Electron Store (`youtubeOnlinePresetsByUser`) keyed by normalized user email.
+	- Added preload bridge exposure for save/load methods.
+- Reason: establish stable IPC/data contract now so storage backend can later be swapped to Firebase with minimal UI changes.
+
+### Preset Sync Verification Note
+- Verified that current `youtube-online-presets-save/load` handlers are authenticated by Google login state and user email.
+- Verified current persistence target is still local Electron Store (`youtubeOnlinePresetsByUser`) in main process.
+- Result: feature currently behaves as account-scoped local persistence (pre-Firebase), not remote Firebase storage yet.
+
+### YouTube Checkbox Visual Polish
+- Scope: circular minimalist checkbox styling update in renderer YouTube forms.
+- Backend impact: None.
+- Reason: visual and layout changes are CSS/renderer-only with no IPC or service behavior changes.

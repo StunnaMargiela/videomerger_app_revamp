@@ -180,3 +180,91 @@
 ### Preview Player Controls Restored
 - Restored native video controls (play/pause/progress bar) on Arrange and Finalize preview players.
 - Kept restricted options to avoid PiP/download behavior by setting `controlsList="nodownload noplaybackrate"` and `disablePictureInPicture`.
+
+### Accent Color Unification + Theme-Dependent Lock/Duplicate Colors
+- Removed random lock/duplicate icon color cycling by normalizing all cycle variants to one shared accent color.
+- Reworked accent styling in the UI to use theme tokens instead of hardcoded blue literals.
+- Accent behavior is now theme-specific:
+  - Olive Dark: olive-tinted accent.
+  - Midnight Blue: blue accent.
+  - Sand Light: beige accent with darker accent text for readability.
+- Updated key accent surfaces (badges, active states, dropzone highlights, tab highlights, primary buttons, and progress fill) to follow the active theme accent.
+
+### Packaged Build Icon Reliability (Docker/Electron)
+- Updated renderer favicon path from absolute (`/app-icon.svg`) to relative (`./app-icon.svg`) so the icon resolves when the app is loaded from `file://` in packaged builds.
+- Added robust runtime icon resolution for BrowserWindow icons in main process, checking both common packaged resource layouts:
+  - `<resources>/icon.(ico|png)`
+  - `<resources>/resources/icon.(ico|png)`
+- Applied the same icon resolution to the Google OAuth popup window, so title-bar icon behavior matches the main app window.
+
+### Theme Selection Sync + Classic Theme
+- Fixed theme picker sync in Settings so the selected option reflects the live active theme instead of stale persisted fallback values.
+- Added a new `Classic` theme option and made it the default theme.
+- `Classic` uses the original visual direction (olive-dark surfaces with blue accents).
+- Preserved the other three selectable themes: `Olive Dark` (olive accents), `Midnight Blue`, and `Sand Light`.
+- Added a user preference tracker for theme selection that auto-persists:
+  - current theme,
+  - last theme change timestamp,
+  - total change count,
+  - recent theme history (up to 20 entries).
+
+### Renderer Icon Fallback Hardening
+- Replaced hardcoded absolute app logo paths in React UI (`/app-icon.svg`) with a reusable brand icon component using relative paths.
+- Added failover for in-app logo rendering: try `./app-icon.svg`, then fall back to `./icon.png` if SVG fails to resolve.
+- Added multiple favicon links in renderer HTML (`svg` + `png` + `shortcut icon`) using relative paths to improve compatibility in packaged `file://` runtime.
+
+### Broadened Input Format Support + Finalization Compatibility Summary
+- Expanded supported input extensions in both renderer filtering and native file picker configuration:
+  - `mp4`, `mov`, `avi`, `mkv`, `webm`, `m4v`, `mpg`, `mpeg`, `ts`, `m2ts`, `flv`, `wmv`, `3gp`, `ogv`, `vob`, `mxf`.
+- Enhanced arrange metadata IPC to include per-clip `width`, `height`, and `fps` via `ffprobe`.
+- Finalization now warns when mixed container extensions are detected, including why mixed formats can increase processing time and risk re-encoding differences.
+
+## 2026-03-16
+
+### YouTube Preset Schema Expansion (Finalize + Settings)
+- Expanded YouTube defaults/presets beyond title/description/privacy to cover most upload metadata:
+  - category, tags, language, made-for-kids, notify-subscribers, license, embeddable, and public-stats visibility.
+- Finalize quick-upload panel now exposes these fields so upload metadata and preset values stay aligned.
+- Settings → YouTube now includes the same expanded default field set for parity and easier baseline tuning.
+
+### Online Preset Controls in Settings
+- Added `Save Online Presets` and `Load Online Presets` actions in Settings → YouTube.
+- Added inline sync status messaging (saving/loading/failed/last-updated) to clarify online preset state.
+- Online sync buttons are enabled only while authenticated and not busy.
+
+### Firebase Migration Guide Added
+- Added a dedicated Firebase guide markdown with:
+  - proposed Firestore schema,
+  - account mapping strategy,
+  - starter security rules,
+  - save/load flow,
+  - migration path from local store to cloud.
+- Finalization merge preview now includes:
+  - target resolution and target FPS summary,
+  - collapsible source clip breakdown grouped by resolution and FPS with occurrence counts.
+
+### Preview Playback Consistency Stabilization
+- Improved Arrange and Finalize preview reliability for repeated selections and duplicate clips.
+- Updated player remount keys to include clip index so selecting the same source path in another slot reliably refreshes playback.
+- Added guarded replay trigger on preview selection changes (`currentTime` reset + safe `play()` retry).
+- Added preview error status message to surface non-playable stream/layout cases instead of failing silently.
+
+### Rapid-Cycling Preview Stability
+- Hardened rapid clip switching behavior in Arrange/Finalize preview panes.
+- Introduced a dedicated preview-selection handler that pauses current players before switching and forces a fresh reload token per selection.
+- Added an interrupted-playback retry path (`load()` + delayed `play()` retry) for fast source changes where the browser aborts decode/start.
+- Added cleanup for pending retry timers on unmount to avoid stale playback actions.
+
+### Preview Transport Stability (Range Requests)
+- Strengthened local preview transport handling by ensuring byte-range requests are preserved when serving `local-video://` media.
+- This improves playback consistency during fast switching and seek-heavy usage where the video element relies on partial content fetches.
+
+### YouTube Preset Carry-Over Fix (Settings -> Finalize)
+- Fixed YouTube quick presets and defaults edited in Settings not propagating to Finalize quick setup during the same app session.
+- Dashboard now emits YouTube defaults/preset sync updates so Finalize fields and preset list refresh immediately.
+- Loading online presets from Settings now also writes to local settings storage, so reopening Finalize keeps the same loaded defaults/presets.
+
+### YouTube Checkbox Visual Polish
+- Refined YouTube toggle checkboxes in both Finalize quick setup and Settings to a circular minimalist style.
+- Replaced ad-hoc inline checkbox layout with reusable toggle row classes for cleaner, consistent spacing.
+- Added focus and checked-state visuals aligned with active theme accent colors.

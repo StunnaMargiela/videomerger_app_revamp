@@ -13,6 +13,7 @@ import { FileSystemVideoRepository } from '../core/repositories/FileSystemVideoR
 import { FFmpegProcessingStrategy } from '../core/strategies/VideoProcessingStrategies';
 import { VideoProcessingService } from '../core/services/VideoProcessingService';
 import { MergeVideosCommand } from '../core/commands/MergeVideosCommand';
+import { getGoogleOAuthConfig } from './oauthConfig';
 import {
   IVideoProcessingService,
   IVideoMergeOptions,
@@ -23,21 +24,6 @@ import {
 
 let mainWindow: BrowserWindow | null = null;
 const store = new Store();
-
-// Google OAuth2 configuration
-const GOOGLE_OAUTH_CONFIG = {
-  clientId: '133055670342-8u9o8ubglh1qqgnpheptqhimj5kl4ddn.apps.googleusercontent.com',
-  clientSecret: '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',
-  redirectUri: 'http://localhost:8976/oauth2callback',
-  authUrl: 'https://accounts.google.com/o/oauth2/auth',
-  tokenUrl: 'https://oauth2.googleapis.com/token',
-  scopes: [
-    'https://www.googleapis.com/auth/youtube.upload',
-    'https://www.googleapis.com/auth/youtube.readonly',
-    'https://www.googleapis.com/auth/userinfo.profile',
-    'https://www.googleapis.com/auth/userinfo.email',
-  ],
-};
 
 if (
   process.platform === 'win32' &&
@@ -76,6 +62,16 @@ function registerLocalVideoProtocol(): void {
       }
 
       const fileUrl = url.pathToFileURL(filePath).toString();
+      // Forward byte-range requests so HTML5 video seeking/switching remains stable.
+      const rangeHeader = request.headers.get('range');
+      if (rangeHeader) {
+        return net.fetch(fileUrl, {
+          headers: {
+            range: rangeHeader,
+          },
+        });
+      }
+
       return net.fetch(fileUrl);
     } catch {
       return new Response('Invalid local video request', { status: 400 });
@@ -141,6 +137,21 @@ function getBundledFFprobePath(): string | null {
   return null;
 }
 
+function resolveAppIconPath(): string | undefined {
+  const ext = process.platform === 'win32' ? '.ico' : '.png';
+  const fallbackExt = process.platform === 'win32' ? '.png' : '.ico';
+  const candidates = [
+    path.join(process.resourcesPath || '', `icon${ext}`),
+    path.join(process.resourcesPath || '', `icon${fallbackExt}`),
+    path.join(process.resourcesPath || '', 'resources', `icon${ext}`),
+    path.join(process.resourcesPath || '', 'resources', `icon${fallbackExt}`),
+    path.join(__dirname, '../../resources', `icon${ext}`),
+    path.join(__dirname, '../../resources', `icon${fallbackExt}`),
+  ];
+
+  return candidates.find((candidate) => !!candidate && fs.existsSync(candidate));
+}
+
 function getVideoDurationSeconds(filePath: string): Promise<number | null> {
   return new Promise((resolve) => {
     const ffprobePath = getBundledFFprobePath() || getFFprobeSystemPath() || 'ffprobe';
@@ -164,6 +175,56 @@ function getVideoDurationSeconds(filePath: string): Promise<number | null> {
           return;
         }
         resolve(null);
+      }
+    );
+  });
+}
+
+function getVideoStreamInfo(filePath: string): Promise<{
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+}> {
+  return new Promise((resolve) => {
+    const ffprobePath = getBundledFFprobePath() || getFFprobeSystemPath() || 'ffprobe';
+    execFile(
+      ffprobePath,
+      [
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height,r_frame_rate',
+        '-of', 'json',
+        filePath,
+      ],
+      { timeout: 15000 },
+      (error, stdout) => {
+        if (error) {
+          resolve({ width: null, height: null, fps: null });
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(stdout || '{}');
+          const stream = Array.isArray(parsed?.streams) ? parsed.streams[0] : null;
+          const width = Number.isFinite(Number(stream?.width)) ? Number(stream.width) : null;
+          const height = Number.isFinite(Number(stream?.height)) ? Number(stream.height) : null;
+
+          let fps: number | null = null;
+          const rate = typeof stream?.r_frame_rate === 'string' ? stream.r_frame_rate : '';
+          if (rate.includes('/')) {
+            const [numStr, denStr] = rate.split('/');
+            const num = Number(numStr);
+            const den = Number(denStr);
+            if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+              const value = num / den;
+              fps = Number.isFinite(value) ? value : null;
+            }
+          }
+
+          resolve({ width, height, fps });
+        } catch {
+          resolve({ width: null, height: null, fps: null });
+        }
       }
     );
   });
@@ -199,7 +260,11 @@ function getAppConfig(): IAppConfig {
   return {
     pythonPath: 'python',
     pythonScriptPath,
-    supportedFormats: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
+    supportedFormats: [
+      'mp4', 'mov', 'avi', 'mkv', 'webm',
+      'm4v', 'mpg', 'mpeg', 'ts', 'm2ts',
+      'flv', 'wmv', '3gp', 'ogv', 'vob', 'mxf',
+    ],
     maxFileSizeMb: store.get('maxFileSizeMb', 500) as number,
     ...(bundledPath ? { ffmpegPath: bundledPath } : {}),
   };
@@ -242,6 +307,8 @@ function setupDependencies(): void {
  * Create the main application window
  */
 function createWindow(): void {
+  const appIconPath = resolveAppIconPath();
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -253,15 +320,7 @@ function createWindow(): void {
     },
     title: 'Video Merger',
     backgroundColor: '#1e1e1e',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: 'rgba(0, 0, 0, 0)',
-      symbolColor: '#b3b9ad',
-      height: 40
-    },
-    icon: process.env.NODE_ENV === 'development'
-      ? path.join(__dirname, '../../resources/icon.png')
-      : path.join(process.resourcesPath, 'icon.png'),
+    icon: appIconPath,
   });
 
   mainWindow.setMenuBarVisibility(false);
@@ -294,16 +353,18 @@ class IPCProcessingObserver implements IProcessingObserver {
  * Perform Google OAuth2 token exchange
  */
 function exchangeCodeForTokens(code: string): Promise<any> {
+  const config = getGoogleOAuthConfig();
+
   return new Promise((resolve, reject) => {
     const postData = new url.URLSearchParams({
       code,
-      client_id: GOOGLE_OAUTH_CONFIG.clientId,
-      client_secret: GOOGLE_OAUTH_CONFIG.clientSecret,
-      redirect_uri: GOOGLE_OAUTH_CONFIG.redirectUri,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      redirect_uri: config.redirectUri,
       grant_type: 'authorization_code',
     }).toString();
 
-    const req = https.request(GOOGLE_OAUTH_CONFIG.tokenUrl, {
+    const req = https.request(config.tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -443,19 +504,47 @@ function uploadVideoToYouTube(
   filePath: string,
   title: string,
   description: string,
-  privacy: string
+  privacy: string,
+  options?: {
+    categoryId?: string;
+    tags?: string[];
+    defaultLanguage?: string;
+    madeForKids?: boolean;
+    notifySubscribers?: boolean;
+    license?: 'youtube' | 'creativeCommon';
+    embeddable?: boolean;
+    publicStatsViewable?: boolean;
+  }
 ): Promise<any> {
   return new Promise((resolve, reject) => {
     const fileSize = fs.statSync(filePath).size;
+    const categoryId = (options?.categoryId || '22').trim() || '22';
+    const tags = Array.isArray(options?.tags) ? options.tags.filter((tag) => typeof tag === 'string' && tag.trim()) : [];
+    const defaultLanguage = typeof options?.defaultLanguage === 'string' ? options.defaultLanguage.trim() : '';
+    const notifySubscribers = options?.notifySubscribers !== false;
     const metadata = JSON.stringify({
-      snippet: { title, description, categoryId: '22' },
-      status: { privacyStatus: privacy },
+      snippet: {
+        title,
+        description,
+        categoryId,
+        ...(tags.length > 0 ? { tags } : {}),
+        ...(defaultLanguage ? { defaultLanguage } : {}),
+      },
+      status: {
+        privacyStatus: privacy,
+        ...(typeof options?.madeForKids === 'boolean' ? { selfDeclaredMadeForKids: options.madeForKids } : {}),
+        ...(options?.license ? { license: options.license } : {}),
+        ...(typeof options?.embeddable === 'boolean' ? { embeddable: options.embeddable } : {}),
+        ...(typeof options?.publicStatsViewable === 'boolean' ? { publicStatsViewable: options.publicStatsViewable } : {}),
+      },
     });
+
+    const notifySubscribersParam = notifySubscribers ? 'true' : 'false';
 
     // Step 1: Initiate resumable upload
     const initReq = https.request({
       hostname: 'www.googleapis.com',
-      path: '/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+      path: `/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status&notifySubscribers=${notifySubscribersParam}`,
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -565,18 +654,27 @@ function setupIPC(): void {
     const uniquePaths = Array.from(new Set((paths || []).filter(Boolean)));
     const entries = await Promise.all(uniquePaths.map(async (filePath) => {
       try {
-        const stats = await fs.promises.stat(filePath);
-        const duration = await getVideoDurationSeconds(filePath);
+        const [stats, duration, streamInfo] = await Promise.all([
+          fs.promises.stat(filePath),
+          getVideoDurationSeconds(filePath),
+          getVideoStreamInfo(filePath),
+        ]);
         return [filePath, {
           duration,
           modifiedMs: stats.mtimeMs,
           size: stats.size,
+          width: streamInfo.width,
+          height: streamInfo.height,
+          fps: streamInfo.fps,
         }];
       } catch {
         return [filePath, {
           duration: null,
           modifiedMs: null,
           size: null,
+          width: null,
+          height: null,
+          fps: null,
         }];
       }
     }));
@@ -668,22 +766,38 @@ function setupIPC(): void {
   // --- Google OAuth2 handlers ---
 
   ipcMain.handle('google-oauth-login', async () => {
+    console.log('[Auth][Main] google-oauth-login invoked');
+    let config;
+    try {
+      config = getGoogleOAuthConfig();
+    } catch (err: any) {
+      console.error('[Auth][Main] OAuth config error:', err?.message || err);
+      return { success: false, error: err?.message || 'Google OAuth not configured.' };
+    }
+
     return new Promise((resolve, reject) => {
-      const authUrl = `${GOOGLE_OAUTH_CONFIG.authUrl}?` +
-        `client_id=${encodeURIComponent(GOOGLE_OAUTH_CONFIG.clientId)}` +
-        `&redirect_uri=${encodeURIComponent(GOOGLE_OAUTH_CONFIG.redirectUri)}` +
+      console.log('[Auth][Main] Starting OAuth flow', {
+        redirectUri: config.redirectUri,
+        hasClientId: Boolean(config.clientId),
+        hasClientSecret: Boolean(config.clientSecret),
+      });
+      const authUrl = `${config.authUrl}?` +
+        `client_id=${encodeURIComponent(config.clientId)}` +
+        `&redirect_uri=${encodeURIComponent(config.redirectUri)}` +
         `&response_type=code` +
-        `&scope=${encodeURIComponent(GOOGLE_OAUTH_CONFIG.scopes.join(' '))}` +
+        `&scope=${encodeURIComponent(config.scopes.join(' '))}` +
         `&access_type=offline` +
         `&prompt=consent`;
 
       // Create a local HTTP server to catch the redirect
       const server = http.createServer(async (req, res) => {
         try {
+          console.log('[Auth][Main] OAuth callback received:', req.url || '/');
           const reqUrl = new url.URL(req.url || '', `http://localhost:8976`);
           const code = reqUrl.searchParams.get('code');
 
           if (code) {
+            console.log('[Auth][Main] Authorization code received; exchanging for tokens');
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end('<html><body><h2>Login successful! You can close this window.</h2><script>window.close();</script></body></html>');
 
@@ -713,6 +827,7 @@ function setupIPC(): void {
               },
             });
           } else {
+            console.error('[Auth][Main] OAuth callback without code');
             res.writeHead(400, { 'Content-Type': 'text/html' });
             res.end('<html><body><h2>Login failed. Please try again.</h2></body></html>');
             server.close();
@@ -720,6 +835,7 @@ function setupIPC(): void {
             resolve({ success: false, error: 'No authorization code received' });
           }
         } catch (err: any) {
+          console.error('[Auth][Main] OAuth callback handler error:', err?.message || err);
           res.writeHead(500, { 'Content-Type': 'text/html' });
           res.end('<html><body><h2>Login error. Please try again.</h2></body></html>');
           server.close();
@@ -729,7 +845,7 @@ function setupIPC(): void {
       });
 
       server.listen(8976, () => {
-        // Server ready, now open auth window
+        console.log('[Auth][Main] OAuth callback server listening on http://localhost:8976');
       });
 
       // Open OAuth2 popup
@@ -739,6 +855,7 @@ function setupIPC(): void {
         parent: mainWindow || undefined,
         modal: true,
         autoHideMenuBar: true,
+        icon: resolveAppIconPath(),
         webPreferences: { nodeIntegration: false, contextIsolation: true },
       });
 
@@ -746,6 +863,7 @@ function setupIPC(): void {
 
       authWindow.loadURL(authUrl);
       authWindow.on('closed', () => {
+        console.log('[Auth][Main] OAuth window closed by user');
         authWindow = null;
         server.close();
       });
@@ -775,6 +893,14 @@ function setupIPC(): void {
     title: string;
     description?: string;
     privacy?: string;
+    categoryId?: string;
+    tags?: string[];
+    defaultLanguage?: string;
+    madeForKids?: boolean;
+    notifySubscribers?: boolean;
+    license?: 'youtube' | 'creativeCommon';
+    embeddable?: boolean;
+    publicStatsViewable?: boolean;
   }) => {
     const auth = store.get('googleAuth') as any;
     if (!auth || !auth.accessToken) {
@@ -787,7 +913,17 @@ function setupIPC(): void {
         options.filePath,
         options.title,
         options.description || '',
-        options.privacy || 'private'
+        options.privacy || 'private',
+        {
+          categoryId: options.categoryId,
+          tags: options.tags,
+          defaultLanguage: options.defaultLanguage,
+          madeForKids: options.madeForKids,
+          notifySubscribers: options.notifySubscribers,
+          license: options.license,
+          embeddable: options.embeddable,
+          publicStatsViewable: options.publicStatsViewable,
+        }
       );
       return result;
     } catch (err: any) {
@@ -812,6 +948,53 @@ function setupIPC(): void {
         : rawMessage;
       return { success: false, error: friendlyMessage, needsReauth };
     }
+  });
+
+  ipcMain.handle('youtube-online-presets-save', async (event, payload: {
+    defaults: Record<string, any>;
+    presets: Array<Record<string, any>>;
+  }) => {
+    const auth = store.get('googleAuth') as any;
+    const userEmail = String(auth?.user?.email || '').trim().toLowerCase();
+    if (!auth || !auth.accessToken || !userEmail) {
+      return { success: false, error: 'Not authenticated with Google' };
+    }
+
+    const existing = (store.get('youtubeOnlinePresetsByUser') as Record<string, any>) || {};
+    existing[userEmail] = {
+      userEmail,
+      updatedAt: new Date().toISOString(),
+      defaults: payload?.defaults || {},
+      presets: Array.isArray(payload?.presets) ? payload.presets : [],
+    };
+    store.set('youtubeOnlinePresetsByUser', existing);
+    return { success: true, updatedAt: existing[userEmail].updatedAt };
+  });
+
+  ipcMain.handle('youtube-online-presets-load', async () => {
+    const auth = store.get('googleAuth') as any;
+    const userEmail = String(auth?.user?.email || '').trim().toLowerCase();
+    if (!auth || !auth.accessToken || !userEmail) {
+      return { success: false, error: 'Not authenticated with Google' };
+    }
+
+    const existing = (store.get('youtubeOnlinePresetsByUser') as Record<string, any>) || {};
+    const accountData = existing[userEmail];
+    if (!accountData) {
+      return {
+        success: true,
+        defaults: {},
+        presets: [],
+        updatedAt: null,
+      };
+    }
+
+    return {
+      success: true,
+      defaults: accountData.defaults || {},
+      presets: Array.isArray(accountData.presets) ? accountData.presets : [],
+      updatedAt: accountData.updatedAt || null,
+    };
   });
 }
 

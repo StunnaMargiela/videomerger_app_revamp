@@ -12,6 +12,9 @@ declare global {
         duration: number | null;
         modifiedMs: number | null;
         size: number | null;
+        width: number | null;
+        height: number | null;
+        fps: number | null;
       }>>;
       mergeVideos: (options: any) => Promise<any>;
       checkFFmpeg: () => Promise<{ available: boolean; version: string }>;
@@ -48,13 +51,29 @@ declare global {
           url?: string | null;
         }>;
       }>;
+      saveYouTubeOnlinePresets: (payload: { defaults: Record<string, any>; presets: Array<Record<string, any>> }) => Promise<{
+        success: boolean;
+        error?: string;
+        updatedAt?: string;
+      }>;
+      loadYouTubeOnlinePresets: () => Promise<{
+        success: boolean;
+        error?: string;
+        defaults?: Record<string, any>;
+        presets?: Array<Record<string, any>>;
+        updatedAt?: string | null;
+      }>;
       openExternal: (url: string) => Promise<boolean>;
       onProcessingEvent: (callback: (event: any) => void) => void;
     };
   }
 }
 
-const SUPPORTED_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
+const SUPPORTED_EXTENSIONS = [
+  'mp4', 'mov', 'avi', 'mkv', 'webm',
+  'm4v', 'mpg', 'mpeg', 'ts', 'm2ts',
+  'flv', 'wmv', '3gp', 'ogv', 'vob', 'mxf',
+];
 
 const RESOLUTION_OPTIONS = [
   { value: 'original', label: 'Original' },
@@ -76,6 +95,9 @@ interface ArrangeVideoMeta {
   duration: number | null;
   modifiedMs: number | null;
   size: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
 }
 
 interface YouTubeQuickPreset {
@@ -83,6 +105,14 @@ interface YouTubeQuickPreset {
   title: string;
   description: string;
   privacy: string;
+  categoryId?: string;
+  tags?: string;
+  defaultLanguage?: string;
+  madeForKids?: boolean;
+  notifySubscribers?: boolean;
+  license?: 'youtube' | 'creativeCommon';
+  embeddable?: boolean;
+  publicStatsViewable?: boolean;
 }
 
 interface GoogleUser {
@@ -106,7 +136,49 @@ interface YouTubeRecentVideo {
   url?: string | null;
 }
 
-type AppTheme = 'olive-dark' | 'midnight-blue' | 'sand-light';
+type AppTheme = 'classic' | 'olive-dark' | 'midnight-blue' | 'sand-light';
+
+const APP_THEMES: AppTheme[] = ['classic', 'olive-dark', 'midnight-blue', 'sand-light'];
+
+const isAppTheme = (value: unknown): value is AppTheme => {
+  return typeof value === 'string' && APP_THEMES.includes(value as AppTheme);
+};
+
+const normalizeAppTheme = (value: unknown, fallback: AppTheme = 'classic'): AppTheme => {
+  return isAppTheme(value) ? value : fallback;
+};
+
+const YOUTUBE_DEFAULT_SETTINGS = {
+  ytDefaultTitle: '',
+  ytDefaultDescription: '',
+  ytDefaultPrivacy: 'private',
+  ytDefaultCategoryId: '22',
+  ytDefaultTags: '',
+  ytDefaultLanguage: 'en',
+  ytDefaultMadeForKids: false,
+  ytDefaultNotifySubscribers: true,
+  ytDefaultLicense: 'youtube' as 'youtube' | 'creativeCommon',
+  ytDefaultEmbeddable: true,
+  ytDefaultPublicStatsViewable: true,
+};
+
+const sanitizeYtPreset = (preset: any): YouTubeQuickPreset | null => {
+  if (!preset || typeof preset.name !== 'string') return null;
+  return {
+    name: preset.name,
+    title: String(preset.title || ''),
+    description: String(preset.description || ''),
+    privacy: String(preset.privacy || 'private'),
+    categoryId: String(preset.categoryId || '22'),
+    tags: String(preset.tags || ''),
+    defaultLanguage: String(preset.defaultLanguage || 'en'),
+    madeForKids: Boolean(preset.madeForKids),
+    notifySubscribers: preset.notifySubscribers !== false,
+    license: preset.license === 'creativeCommon' ? 'creativeCommon' : 'youtube',
+    embeddable: preset.embeddable !== false,
+    publicStatsViewable: preset.publicStatsViewable !== false,
+  };
+};
 
 const GoogleLogoIcon: React.FC<{ className?: string }> = ({ className = '' }) => (
   <svg
@@ -134,6 +206,26 @@ const GoogleLogoIcon: React.FC<{ className?: string }> = ({ className = '' }) =>
     />
   </svg>
 );
+
+const APP_ICON_SVG = './app-icon.svg';
+const APP_ICON_PNG = './icon.png';
+
+const AppBrandLogo: React.FC = () => {
+  const [iconSrc, setIconSrc] = useState<string>(APP_ICON_SVG);
+
+  return (
+    <img
+      src={iconSrc}
+      alt="Video Merger icon"
+      className="brand-logo"
+      onError={() => {
+        if (iconSrc !== APP_ICON_PNG) {
+          setIconSrc(APP_ICON_PNG);
+        }
+      }}
+    />
+  );
+};
 
 const App: React.FC = () => {
   // Wizard state
@@ -169,14 +261,24 @@ const App: React.FC = () => {
   const [ytTitle, setYtTitle] = useState<string>('');
   const [ytDescription, setYtDescription] = useState<string>('');
   const [ytPrivacy, setYtPrivacy] = useState<string>('private');
+  const [ytCategoryId, setYtCategoryId] = useState<string>('22');
+  const [ytTags, setYtTags] = useState<string>('');
+  const [ytDefaultLanguage, setYtDefaultLanguage] = useState<string>('en');
+  const [ytMadeForKids, setYtMadeForKids] = useState<boolean>(false);
+  const [ytNotifySubscribers, setYtNotifySubscribers] = useState<boolean>(true);
+  const [ytLicense, setYtLicense] = useState<'youtube' | 'creativeCommon'>('youtube');
+  const [ytEmbeddable, setYtEmbeddable] = useState<boolean>(true);
+  const [ytPublicStatsViewable, setYtPublicStatsViewable] = useState<boolean>(true);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [finalizeConfigView, setFinalizeConfigView] = useState<'merge' | 'youtube'>('merge');
   const [ytPresetName, setYtPresetName] = useState<string>('');
   const [ytQuickPresets, setYtQuickPresets] = useState<YouTubeQuickPreset[]>([]);
   const [selectedYtPresetName, setSelectedYtPresetName] = useState<string>('');
-  const [appTheme, setAppTheme] = useState<AppTheme>('olive-dark');
+  const [appTheme, setAppTheme] = useState<AppTheme>('classic');
   const [defaultOutputDir, setDefaultOutputDir] = useState<string>('');
+  const [settingsLoaded, setSettingsLoaded] = useState<boolean>(false);
+  const lastTrackedTheme = useRef<AppTheme | null>(null);
 
   // Arrange sort state
   const [sortBy, setSortBy] = useState<SortField>('none');
@@ -188,10 +290,33 @@ const App: React.FC = () => {
   const [previewVideoIndex, setPreviewVideoIndex] = useState<number>(0);
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
+  const arrangePreviewRef = useRef<HTMLVideoElement | null>(null);
+  const finalizePreviewRef = useRef<HTMLVideoElement | null>(null);
+  const previewRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [previewReloadToken, setPreviewReloadToken] = useState<number>(0);
 
   // Dashboard state
   const [showDashboard, setShowDashboard] = useState<boolean>(false);
   const [dashboardInitialTab, setDashboardInitialTab] = useState<'general' | 'youtube' | 'ffmpeg' | 'account'>('general');
+
+  const syncFinalizeYouTubeFromSettings = useCallback((payload: {
+    defaults: Record<string, any>;
+    presets: YouTubeQuickPreset[];
+  }) => {
+    const defaults = payload.defaults || {};
+    setYtQuickPresets(Array.isArray(payload.presets) ? payload.presets : []);
+    setYtTitle(String(defaults.ytDefaultTitle || ''));
+    setYtDescription(String(defaults.ytDefaultDescription || ''));
+    setYtPrivacy(String(defaults.ytDefaultPrivacy || 'private'));
+    setYtCategoryId(String(defaults.ytDefaultCategoryId || '22'));
+    setYtTags(String(defaults.ytDefaultTags || ''));
+    setYtDefaultLanguage(String(defaults.ytDefaultLanguage || 'en'));
+    setYtMadeForKids(Boolean(defaults.ytDefaultMadeForKids));
+    setYtNotifySubscribers(defaults.ytDefaultNotifySubscribers !== false);
+    setYtLicense(defaults.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube');
+    setYtEmbeddable(defaults.ytDefaultEmbeddable !== false);
+    setYtPublicStatsViewable(defaults.ytDefaultPublicStatsViewable !== false);
+  }, []);
 
   useEffect(() => {
     checkFFmpeg();
@@ -221,18 +346,30 @@ const App: React.FC = () => {
         const settings = await window.electronAPI.getSettings();
         const presets = settings?.ytQuickPresets;
         if (Array.isArray(presets)) {
-          setYtQuickPresets(presets.filter((p: any) => p && typeof p.name === 'string'));
+          setYtQuickPresets(presets.map(sanitizeYtPreset).filter(Boolean) as YouTubeQuickPreset[]);
         }
 
-        if (typeof settings?.appTheme === 'string') {
-          setAppTheme(settings.appTheme as AppTheme);
-        }
+        setYtTitle(String(settings?.ytDefaultTitle || ''));
+        setYtDescription(String(settings?.ytDefaultDescription || ''));
+        setYtPrivacy(String(settings?.ytDefaultPrivacy || 'private'));
+        setYtCategoryId(String(settings?.ytDefaultCategoryId || '22'));
+        setYtTags(String(settings?.ytDefaultTags || ''));
+        setYtDefaultLanguage(String(settings?.ytDefaultLanguage || 'en'));
+        setYtMadeForKids(Boolean(settings?.ytDefaultMadeForKids));
+        setYtNotifySubscribers(settings?.ytDefaultNotifySubscribers !== false);
+        setYtLicense(settings?.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube');
+        setYtEmbeddable(settings?.ytDefaultEmbeddable !== false);
+        setYtPublicStatsViewable(settings?.ytDefaultPublicStatsViewable !== false);
+
+        setAppTheme(normalizeAppTheme(settings?.appTheme, 'classic'));
 
         if (typeof settings?.defaultOutputDir === 'string') {
           setDefaultOutputDir(settings.defaultOutputDir);
         }
       } catch {
         // noop
+      } finally {
+        setSettingsLoaded(true);
       }
     };
     loadAppSettings();
@@ -241,6 +378,46 @@ const App: React.FC = () => {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', appTheme);
   }, [appTheme]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (lastTrackedTheme.current === appTheme) return;
+
+    lastTrackedTheme.current = appTheme;
+
+    const trackThemePreference = async () => {
+      try {
+        const currentSettings = await window.electronAPI.getSettings();
+        const existingTracker = currentSettings?.userPreferenceTracker || {};
+        const previousHistory = Array.isArray(existingTracker?.themeHistory)
+          ? existingTracker.themeHistory
+          : [];
+
+        const nextEntry = {
+          value: appTheme,
+          changedAt: new Date().toISOString(),
+        };
+
+        const nextHistory = [...previousHistory, nextEntry].slice(-20);
+
+        await window.electronAPI.saveSettings({
+          ...currentSettings,
+          appTheme,
+          userPreferenceTracker: {
+            ...existingTracker,
+            currentTheme: appTheme,
+            lastThemeChangedAt: nextEntry.changedAt,
+            themeChangeCount: Number(existingTracker?.themeChangeCount || 0) + 1,
+            themeHistory: nextHistory,
+          },
+        });
+      } catch {
+        // noop
+      }
+    };
+
+    trackThemePreference();
+  }, [appTheme, settingsLoaded]);
 
   const canProceedStep1 = selectedFiles.length >= 2;
   const canProceedStep2 = selectedFiles.length >= 2;
@@ -282,12 +459,18 @@ const App: React.FC = () => {
               duration: null,
               modifiedMs: null,
               size: typeof info?.size === 'number' ? info.size : null,
+              width: typeof info?.width === 'number' ? info.width : null,
+              height: typeof info?.height === 'number' ? info.height : null,
+              fps: typeof info?.fps === 'number' ? info.fps : null,
             } as ArrangeVideoMeta] as const;
           } catch {
             return [filePath, {
               duration: null,
               modifiedMs: null,
               size: null,
+              width: null,
+              height: null,
+              fps: null,
             } as ArrangeVideoMeta] as const;
           }
         }));
@@ -349,13 +532,39 @@ const App: React.FC = () => {
     setAuthChecked(true);
   };
 
-  const handleGoogleLogin = async () => {
-    const result = await window.electronAPI.googleOAuthLogin();
-    if (result.success && result.user) {
-      setIsLoggedIn(true);
-      setGoogleUser(result.user);
+  const handleGoogleLogin = async (source: 'welcome' | 'dashboard' = 'welcome') => {
+    console.debug('[Auth][Renderer] Google sign-in clicked', { source, step, isLoggedIn });
+    setStatus('');
+    try {
+      const result = await window.electronAPI.googleOAuthLogin();
+      console.debug('[Auth][Renderer] googleOAuthLogin result', {
+        source,
+        success: Boolean(result?.success),
+        hasUser: Boolean(result?.user),
+        error: result?.error || null,
+      });
+      if (result.success && result.user) {
+        setIsLoggedIn(true);
+        setGoogleUser(result.user);
+        // Advance only if the user is on the welcome screen; keep dashboard open otherwise.
+        setStep((prev) => (prev === 0 ? 1 : prev));
+        return true;
+      }
+      setStatus(result?.error ? `Google sign-in failed: ${result.error}` : 'Google sign-in failed. Please try again.');
+      return false;
+    } catch (err: any) {
+      console.error('[Auth][Renderer] googleOAuthLogin threw', err);
+      setStatus(err?.message ? `Google sign-in failed: ${err.message}` : 'Google sign-in failed. Check your internet connection and try again.');
+      return false;
     }
-    setStep(1);
+  };
+
+  const handleGoogleLoginFromWelcome = () => {
+    void handleGoogleLogin('welcome');
+  };
+
+  const handleGoogleLoginFromDashboard = () => {
+    void handleGoogleLogin('dashboard');
   };
 
   const handleSkipLogin = async () => {
@@ -520,6 +729,54 @@ const App: React.FC = () => {
     });
   };
 
+  const handleSelectPreview = (index: number) => {
+    if (index < 0 || index >= selectedFiles.length) return;
+    arrangePreviewRef.current?.pause();
+    finalizePreviewRef.current?.pause();
+    setPreviewVideoIndex(index);
+    setPreviewReloadToken((current) => current + 1);
+  };
+
+  const handlePreviewPlaybackError = () => {
+    setStatus('Preview could not be played for this clip. The file may use an unsupported stream layout on this machine.');
+  };
+
+  useEffect(() => {
+    const activePlayer = step === 2 ? arrangePreviewRef.current : step === 3 ? finalizePreviewRef.current : null;
+    if (!activePlayer || !previewVideoSrc) return;
+
+    if (previewRetryTimerRef.current) {
+      clearTimeout(previewRetryTimerRef.current);
+      previewRetryTimerRef.current = null;
+    }
+
+    // Restart playback when clip selection changes, including duplicate paths.
+    activePlayer.load();
+    activePlayer.currentTime = 0;
+    const playPromise = activePlayer.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {
+        // Fast source switches can interrupt decode; retry once shortly after load settles.
+        previewRetryTimerRef.current = setTimeout(() => {
+          const player = step === 2 ? arrangePreviewRef.current : step === 3 ? finalizePreviewRef.current : null;
+          if (!player) return;
+          player.load();
+          void player.play().catch(() => {
+            // Leave controls available for manual play.
+          });
+        }, 140);
+      });
+    }
+  }, [previewVideoIndex, previewVideoSrc, previewReloadToken, step]);
+
+  useEffect(() => {
+    return () => {
+      if (previewRetryTimerRef.current) {
+        clearTimeout(previewRetryTimerRef.current);
+      }
+    };
+  }, []);
+
   // Duplicate video in arrange
   const handleDuplicateFile = (index: number) => {
     if (!allowDuplicate) {
@@ -644,6 +901,97 @@ const App: React.FC = () => {
     return `${mb.toFixed(1)} MB`;
   };
 
+  const formatClipFps = (fps: number | null | undefined): string => {
+    if (fps === null || fps === undefined || !Number.isFinite(fps) || fps <= 0) return 'Unknown';
+    const rounded = Math.round(fps * 100) / 100;
+    return Number.isInteger(rounded) ? `${rounded}` : `${rounded.toFixed(2)}`;
+  };
+
+  const getExtension = (filePath: string): string => {
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    return ext;
+  };
+
+  const extensionGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const filePath of selectedFiles) {
+      const ext = getExtension(filePath) || 'unknown';
+      map.set(ext, (map.get(ext) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([ext, count]) => ({ ext, count }));
+  }, [selectedFiles]);
+
+  const hasMixedExtensions = extensionGroups.length > 1;
+
+  const resolutionGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const filePath of selectedFiles) {
+      const meta = arrangeVideoMeta[filePath];
+      const label = (meta?.width && meta?.height) ? `${meta.width}x${meta.height}` : 'Unknown';
+      map.set(label, (map.get(label) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([label, count]) => ({ label, count }));
+  }, [arrangeVideoMeta, selectedFiles]);
+
+  const fpsGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const filePath of selectedFiles) {
+      const meta = arrangeVideoMeta[filePath];
+      const label = `${formatClipFps(meta?.fps)} fps`;
+      map.set(label, (map.get(label) || 0) + 1);
+    }
+    return Array.from(map.entries()).map(([label, count]) => ({ label, count }));
+  }, [arrangeVideoMeta, selectedFiles]);
+
+  const mergeTargetSummary = useMemo(() => {
+    const selectedResolutionLabel =
+      RESOLUTION_OPTIONS.find((option) => option.value === standardization.resolution)?.label || 'Original';
+    const selectedFpsLabel =
+      FPS_OPTIONS.find((option) => option.value === standardization.fps)?.label || 'Original';
+
+    let targetResolution = selectedResolutionLabel;
+    let targetFpsLabel = selectedFpsLabel;
+
+    if (standardization.resolution === 'original') {
+      const validRes = selectedFiles
+        .map((filePath) => arrangeVideoMeta[filePath])
+        .filter((meta): meta is ArrangeVideoMeta => !!meta && !!meta.width && !!meta.height);
+
+      if (validRes.length > 0) {
+        let best = validRes[0];
+        for (const meta of validRes) {
+          const bestArea = (best.width || 0) * (best.height || 0);
+          const currentArea = (meta.width || 0) * (meta.height || 0);
+          if (currentArea > 0 && currentArea < bestArea) {
+            best = meta;
+          }
+        }
+        if (best.width && best.height) {
+          targetResolution = `${best.width}x${best.height}`;
+        }
+      } else {
+        targetResolution = 'Original (auto)';
+      }
+    }
+
+    if (standardization.fps === 'original') {
+      const validFps = selectedFiles
+        .map((filePath) => arrangeVideoMeta[filePath]?.fps)
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+
+      if (validFps.length > 0) {
+        targetFpsLabel = `${formatClipFps(Math.min(...validFps))} FPS`;
+      } else {
+        targetFpsLabel = 'Original (auto)';
+      }
+    }
+
+    return {
+      targetResolution,
+      targetFpsLabel,
+    };
+  }, [arrangeVideoMeta, selectedFiles, standardization.fps, standardization.resolution]);
+
   const buildDefaultOutputPath = (): string => {
     if (!defaultOutputDir) return '';
     const separator = defaultOutputDir.includes('\\') ? '\\' : '/';
@@ -725,6 +1073,17 @@ const App: React.FC = () => {
       title: ytTitle,
       description: ytDescription,
       privacy: ytPrivacy,
+      categoryId: ytCategoryId || undefined,
+      tags: ytTags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      defaultLanguage: ytDefaultLanguage || undefined,
+      madeForKids: ytMadeForKids,
+      notifySubscribers: ytNotifySubscribers,
+      license: ytLicense,
+      embeddable: ytEmbeddable,
+      publicStatsViewable: ytPublicStatsViewable,
     });
     setIsUploading(false);
     setUploadResult(result);
@@ -759,6 +1118,14 @@ const App: React.FC = () => {
       title: ytTitle,
       description: ytDescription,
       privacy: ytPrivacy,
+      categoryId: ytCategoryId,
+      tags: ytTags,
+      defaultLanguage: ytDefaultLanguage,
+      madeForKids: ytMadeForKids,
+      notifySubscribers: ytNotifySubscribers,
+      license: ytLicense,
+      embeddable: ytEmbeddable,
+      publicStatsViewable: ytPublicStatsViewable,
     };
 
     const nextPresets = [
@@ -780,6 +1147,14 @@ const App: React.FC = () => {
     setYtTitle(preset.title);
     setYtDescription(preset.description);
     setYtPrivacy(preset.privacy);
+    setYtCategoryId(preset.categoryId || '22');
+    setYtTags(preset.tags || '');
+    setYtDefaultLanguage(preset.defaultLanguage || 'en');
+    setYtMadeForKids(Boolean(preset.madeForKids));
+    setYtNotifySubscribers(preset.notifySubscribers !== false);
+    setYtLicense(preset.license === 'creativeCommon' ? 'creativeCommon' : 'youtube');
+    setYtEmbeddable(preset.embeddable !== false);
+    setYtPublicStatsViewable(preset.publicStatsViewable !== false);
     setStatus(`Loaded preset: ${preset.name}`);
   };
 
@@ -807,6 +1182,14 @@ const App: React.FC = () => {
     setYtTitle('');
     setYtDescription('');
     setYtPrivacy('private');
+    setYtCategoryId('22');
+    setYtTags('');
+    setYtDefaultLanguage('en');
+    setYtMadeForKids(false);
+    setYtNotifySubscribers(true);
+    setYtLicense('youtube');
+    setYtEmbeddable(true);
+    setYtPublicStatsViewable(true);
     setUploadResult(null);
     setStandardization({ resolution: 'original', fps: 'original' });
     setFileLocks([]);
@@ -885,8 +1268,10 @@ const App: React.FC = () => {
         <div className="wizard-shell">
           <header className="wizard-header">
             <div className="brand">
-              <img src="/app-icon.svg" alt="Video Merger icon" className="brand-logo" />
-              <div><h1>VideoMerger</h1></div>
+              <AppBrandLogo />
+              <div>
+                <h1>VideoMerger</h1>
+              </div>
             </div>
           </header>
           <div className="wizard-subheader" />
@@ -897,7 +1282,7 @@ const App: React.FC = () => {
                 Sign in with Google to enable YouTube uploads, or continue without an account.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <button className="btn btn-primary auth-btn" onClick={handleGoogleLogin}>
+                <button className="btn btn-primary auth-btn" onClick={handleGoogleLoginFromWelcome}>
                   <GoogleLogoIcon className="icon-inline" />
                   <span>Sign in with Google</span>
                 </button>
@@ -919,7 +1304,7 @@ const App: React.FC = () => {
         <div className="wizard-shell">
           <header className="wizard-header">
             <div className="brand">
-              <img src="/app-icon.svg" alt="Video Merger icon" className="brand-logo" />
+              <AppBrandLogo />
               <div>
                 <h1>VideoMerger</h1>
               </div>
@@ -946,8 +1331,9 @@ const App: React.FC = () => {
               onStandardizationChange={setStandardization}
               onThemeChange={setAppTheme}
               onDefaultOutputDirChange={setDefaultOutputDir}
+              onYouTubeSettingsSync={syncFinalizeYouTubeFromSettings}
               onLogout={handleLogout}
-              onLogin={handleGoogleLogin}
+              onLogin={handleGoogleLoginFromDashboard}
             />
           </main>
         </div>
@@ -960,7 +1346,7 @@ const App: React.FC = () => {
       <div className="wizard-shell">
         <header className="wizard-header">
           <div className="brand">
-            <img src="/app-icon.svg" alt="Video Merger icon" className="brand-logo" />
+            <AppBrandLogo />
             <div>
               <h1>VideoMerger</h1>
             </div>
@@ -1117,7 +1503,7 @@ const App: React.FC = () => {
                   >
                     <span className="dropzone-icon">{isDragOver ? '📂' : '+'}</span>
                     <span className="dropzone-title">{isDragOver ? 'Drop videos here' : 'Click or drag videos here'}</span>
-                    <span className="dropzone-subtitle">MP4, MOV, AVI, MKV, WEBM supported</span>
+                    <span className="dropzone-subtitle">MP4, MOV, AVI, MKV, WEBM, M4V, MPG, MPEG, TS, M2TS, FLV, WMV, 3GP, OGV, VOB, MXF supported</span>
                   </div>
 
                   <div className="file-grid">
@@ -1188,7 +1574,8 @@ const App: React.FC = () => {
                       <div className="preview-player-box arrange-player-box">
                         {previewVideoSrc ? (
                           <video
-                            key={`arrange-${previewVideoSrc}`}
+                            key={`arrange-${previewVideoSrc}-${previewVideoIndex}-${previewReloadToken}`}
+                            ref={arrangePreviewRef}
                             className="preview-player"
                             controls
                             controlsList="nodownload noplaybackrate"
@@ -1197,6 +1584,7 @@ const App: React.FC = () => {
                             preload="metadata"
                             src={previewVideoSrc}
                             onEnded={handlePreviewEnded}
+                            onError={handlePreviewPlaybackError}
                           />
                         ) : (
                           <div className="preview-player-empty">Select a clip to preview.</div>
@@ -1223,7 +1611,7 @@ const App: React.FC = () => {
                           key={`${file}-${index}`}
                           className={`sequence-item ${index === previewVideoIndex ? 'sequence-item-active' : ''}`}
                           draggable={!isArrangementLockMode || !fileLocks[index]}
-                          onClick={() => setPreviewVideoIndex(index)}
+                          onClick={() => handleSelectPreview(index)}
                           onDragStart={() => handleSeqDragStart(index)}
                           onDragEnter={() => handleSeqDragEnter(index)}
                           onDragEnd={handleSeqDragEnd}
@@ -1313,7 +1701,8 @@ const App: React.FC = () => {
                         <div className="preview-player-box">
                           {previewVideoSrc ? (
                             <video
-                              key={previewVideoSrc}
+                              key={`finalize-${previewVideoSrc}-${previewVideoIndex}-${previewReloadToken}`}
+                              ref={finalizePreviewRef}
                               className="preview-player"
                               controls
                               controlsList="nodownload noplaybackrate"
@@ -1322,6 +1711,7 @@ const App: React.FC = () => {
                               preload="metadata"
                               src={previewVideoSrc}
                               onEnded={handlePreviewEnded}
+                              onError={handlePreviewPlaybackError}
                             />
                           ) : (
                             <div className="preview-player-empty">Select videos in earlier steps to preview here.</div>
@@ -1337,7 +1727,7 @@ const App: React.FC = () => {
                             <li key={`${file}-${i}`}>
                               <button
                                 className={`preview-file-btn ${i === previewVideoIndex ? 'preview-file-btn-active' : ''}`}
-                                onClick={() => setPreviewVideoIndex(i)}
+                                onClick={() => handleSelectPreview(i)}
                                 type="button"
                               >
                                 <span>{i + 1}.</span>
@@ -1375,10 +1765,32 @@ const App: React.FC = () => {
                       <div className="preview-block">
                         <h3>Merge preview</h3>
                         <div className="preview-meta">
-                          <span>Resolution:</span><span>{resolutionLabel}</span>
-                          <span>Frame Rate:</span><span>{fpsLabel}</span>
+                          <span>Target Resolution:</span><span>{mergeTargetSummary.targetResolution}</span>
+                          <span>Target Frame Rate:</span><span>{mergeTargetSummary.targetFpsLabel}</span>
                           <span>Clips:</span><span>{selectedFiles.length}</span>
                         </div>
+
+                        {hasMixedExtensions && (
+                          <div className="upload-error" style={{ marginTop: 10 }}>
+                            <strong>Mixed container formats detected:</strong>{' '}
+                            {extensionGroups.map((entry) => `${entry.ext.toUpperCase()} (${entry.count})`).join(', ')}.
+                            <div style={{ marginTop: 6 }}>
+                              FFmpeg will normalize them first, but this can increase processing time and may introduce re-encoding differences
+                              because source containers/codecs can use different timing, color metadata, and audio layouts.
+                            </div>
+                          </div>
+                        )}
+
+                        <details className="merge-summary-details" style={{ marginTop: 10 }}>
+                          <summary className="merge-summary-toggle">Source clip breakdown</summary>
+                          <div className="preview-meta" style={{ marginTop: 8 }}>
+                            <span>Resolutions:</span>
+                            <span>{resolutionGroups.map((entry) => `${entry.label} (${entry.count})`).join(', ')}</span>
+                            <span>Frame Rates:</span>
+                            <span>{fpsGroups.map((entry) => `${entry.label} (${entry.count})`).join(', ')}</span>
+                          </div>
+                        </details>
+
                         {isLoggedIn && (
                           <p style={{ margin: '10px 0 0', color: 'var(--olive-200)' }}>
                             <GoogleLogoIcon className="icon-inline" />
@@ -1447,6 +1859,72 @@ const App: React.FC = () => {
                                 rows={2}
                               />
                             </label>
+
+                            <div className="yt-inline-row">
+                              <label>
+                                Category
+                                <select value={ytCategoryId} onChange={e => setYtCategoryId(e.target.value)} className="std-select">
+                                  <option value="22">People & Blogs</option>
+                                  <option value="24">Entertainment</option>
+                                  <option value="20">Gaming</option>
+                                  <option value="10">Music</option>
+                                  <option value="27">Education</option>
+                                  <option value="28">Science & Technology</option>
+                                </select>
+                              </label>
+                              <label>
+                                Language
+                                <input
+                                  type="text"
+                                  value={ytDefaultLanguage}
+                                  onChange={e => setYtDefaultLanguage(e.target.value)}
+                                  placeholder="en"
+                                  className="yt-input"
+                                />
+                              </label>
+                            </div>
+
+                            <label>
+                              Tags (comma separated)
+                              <input
+                                type="text"
+                                value={ytTags}
+                                onChange={e => setYtTags(e.target.value)}
+                                placeholder="merge, highlights, weekly"
+                                className="yt-input"
+                              />
+                            </label>
+
+                            <div className="yt-inline-row">
+                              <label>
+                                License
+                                <select value={ytLicense} onChange={e => setYtLicense(e.target.value as 'youtube' | 'creativeCommon')} className="std-select">
+                                  <option value="youtube">Standard YouTube License</option>
+                                  <option value="creativeCommon">Creative Commons</option>
+                                </select>
+                              </label>
+                            </div>
+
+                            <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                              <label className="yt-toggle">
+                                <input type="checkbox" checked={ytMadeForKids} onChange={e => setYtMadeForKids(e.target.checked)} />
+                                Made for kids
+                              </label>
+                              <label className="yt-toggle">
+                                <input type="checkbox" checked={ytNotifySubscribers} onChange={e => setYtNotifySubscribers(e.target.checked)} />
+                                Notify subscribers
+                              </label>
+                            </div>
+                            <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                              <label className="yt-toggle">
+                                <input type="checkbox" checked={ytEmbeddable} onChange={e => setYtEmbeddable(e.target.checked)} />
+                                Allow embedding
+                              </label>
+                              <label className="yt-toggle">
+                                <input type="checkbox" checked={ytPublicStatsViewable} onChange={e => setYtPublicStatsViewable(e.target.checked)} />
+                                Public stats visible
+                              </label>
+                            </div>
 
                             <div className="yt-preset-row">
                               <label>
@@ -1555,6 +2033,10 @@ interface DashboardPanelProps {
   onStandardizationChange: (s: { resolution: string; fps: string }) => void;
   onThemeChange: (theme: AppTheme) => void;
   onDefaultOutputDirChange: (path: string) => void;
+  onYouTubeSettingsSync: (payload: {
+    defaults: Record<string, any>;
+    presets: YouTubeQuickPreset[];
+  }) => void;
   onLogout: () => void;
   onLogin: () => void;
 }
@@ -1590,14 +2072,12 @@ const UserAvatar: React.FC<UserAvatarProps> = ({ user, size }) => {
 
 const DashboardPanel: React.FC<DashboardPanelProps> = ({
   isLoggedIn, googleUser, ffmpegDetails, standardization, initialTab, appTheme, defaultOutputDir,
-  onStandardizationChange, onThemeChange, onDefaultOutputDirChange, onLogout, onLogin
+  onStandardizationChange, onThemeChange, onDefaultOutputDirChange, onYouTubeSettingsSync, onLogout, onLogin
 }) => {
   const [settings, setSettings] = useState<any>({
     appTheme: appTheme,
     defaultOutputDir: defaultOutputDir,
-    ytDefaultPrivacy: 'private',
-    ytDefaultTitle: '',
-    ytDefaultDescription: '',
+    ...YOUTUBE_DEFAULT_SETTINGS,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<string>(initialTab);
@@ -1609,6 +2089,8 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
   const [ytSummaryLoading, setYtSummaryLoading] = useState(false);
   const [ytSummaryError, setYtSummaryError] = useState<string>('');
   const [ytSummaryNeedsReauth, setYtSummaryNeedsReauth] = useState(false);
+  const [ytOnlineSyncStatus, setYtOnlineSyncStatus] = useState<string>('');
+  const [ytOnlineSyncBusy, setYtOnlineSyncBusy] = useState<boolean>(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -1664,9 +2146,13 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
     try {
       const data = await window.electronAPI.getSettings();
       if (data) {
-        setSettings((prev: any) => ({ ...prev, ...data }));
+        setSettings((prev: any) => ({
+          ...prev,
+          ...YOUTUBE_DEFAULT_SETTINGS,
+          ...data,
+        }));
         if (Array.isArray(data.ytQuickPresets)) {
-          setYtQuickPresets(data.ytQuickPresets.filter((p: any) => p && typeof p.name === 'string'));
+          setYtQuickPresets(data.ytQuickPresets.map(sanitizeYtPreset).filter(Boolean) as YouTubeQuickPreset[]);
         }
       }
     } catch {
@@ -1677,7 +2163,8 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     await window.electronAPI.saveSettings({ ...settings, ytQuickPresets });
-    onThemeChange((settings.appTheme || 'olive-dark') as AppTheme);
+    onYouTubeSettingsSync({ defaults: settings, presets: ytQuickPresets });
+    onThemeChange(normalizeAppTheme(settings.appTheme, appTheme));
     onDefaultOutputDirChange(settings.defaultOutputDir || '');
     onStandardizationChange({
       resolution: settings.defaultResolution || 'original',
@@ -1701,6 +2188,14 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
         ytDefaultTitle: settings.ytDefaultTitle || '',
         ytDefaultDescription: settings.ytDefaultDescription || '',
         ytDefaultPrivacy: settings.ytDefaultPrivacy || 'private',
+        ytDefaultCategoryId: settings.ytDefaultCategoryId || '22',
+        ytDefaultTags: settings.ytDefaultTags || '',
+        ytDefaultLanguage: settings.ytDefaultLanguage || 'en',
+        ytDefaultMadeForKids: Boolean(settings.ytDefaultMadeForKids),
+        ytDefaultNotifySubscribers: settings.ytDefaultNotifySubscribers !== false,
+        ytDefaultLicense: settings.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube',
+        ytDefaultEmbeddable: settings.ytDefaultEmbeddable !== false,
+        ytDefaultPublicStatsViewable: settings.ytDefaultPublicStatsViewable !== false,
       },
       ytQuickPresets,
     };
@@ -1713,7 +2208,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
 
     const importedDefaults = result.data.youtubeDefaults || {};
     const importedQuickPresets = Array.isArray(result.data.ytQuickPresets)
-      ? result.data.ytQuickPresets.filter((p: any) => p && typeof p.name === 'string')
+      ? result.data.ytQuickPresets.map(sanitizeYtPreset).filter(Boolean)
       : [];
 
     setSettings((prev: any) => ({
@@ -1721,8 +2216,16 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
       ytDefaultTitle: importedDefaults.ytDefaultTitle || prev.ytDefaultTitle || '',
       ytDefaultDescription: importedDefaults.ytDefaultDescription || prev.ytDefaultDescription || '',
       ytDefaultPrivacy: importedDefaults.ytDefaultPrivacy || prev.ytDefaultPrivacy || 'private',
+      ytDefaultCategoryId: importedDefaults.ytDefaultCategoryId || prev.ytDefaultCategoryId || '22',
+      ytDefaultTags: importedDefaults.ytDefaultTags || prev.ytDefaultTags || '',
+      ytDefaultLanguage: importedDefaults.ytDefaultLanguage || prev.ytDefaultLanguage || 'en',
+      ytDefaultMadeForKids: importedDefaults.ytDefaultMadeForKids ?? prev.ytDefaultMadeForKids ?? false,
+      ytDefaultNotifySubscribers: importedDefaults.ytDefaultNotifySubscribers ?? prev.ytDefaultNotifySubscribers ?? true,
+      ytDefaultLicense: importedDefaults.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : (prev.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube'),
+      ytDefaultEmbeddable: importedDefaults.ytDefaultEmbeddable ?? prev.ytDefaultEmbeddable ?? true,
+      ytDefaultPublicStatsViewable: importedDefaults.ytDefaultPublicStatsViewable ?? prev.ytDefaultPublicStatsViewable ?? true,
     }));
-    setYtQuickPresets(importedQuickPresets);
+    setYtQuickPresets(importedQuickPresets as YouTubeQuickPreset[]);
     setSelectedYtPresetName('');
   };
 
@@ -1735,6 +2238,14 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
       title: settings.ytDefaultTitle || '',
       description: settings.ytDefaultDescription || '',
       privacy: settings.ytDefaultPrivacy || 'private',
+      categoryId: settings.ytDefaultCategoryId || '22',
+      tags: settings.ytDefaultTags || '',
+      defaultLanguage: settings.ytDefaultLanguage || 'en',
+      madeForKids: Boolean(settings.ytDefaultMadeForKids),
+      notifySubscribers: settings.ytDefaultNotifySubscribers !== false,
+      license: settings.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube',
+      embeddable: settings.ytDefaultEmbeddable !== false,
+      publicStatsViewable: settings.ytDefaultPublicStatsViewable !== false,
     };
 
     const nextPresets = [
@@ -1744,6 +2255,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
     setYtQuickPresets(nextPresets);
     setSelectedYtPresetName(name);
     await window.electronAPI.saveSettings({ ...settings, ytQuickPresets: nextPresets });
+    onYouTubeSettingsSync({ defaults: settings, presets: nextPresets });
   };
 
   const handleLoadYtQuickPreset = () => {
@@ -1754,7 +2266,32 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
       ytDefaultTitle: preset.title,
       ytDefaultDescription: preset.description,
       ytDefaultPrivacy: preset.privacy,
+      ytDefaultCategoryId: preset.categoryId || '22',
+      ytDefaultTags: preset.tags || '',
+      ytDefaultLanguage: preset.defaultLanguage || 'en',
+      ytDefaultMadeForKids: Boolean(preset.madeForKids),
+      ytDefaultNotifySubscribers: preset.notifySubscribers !== false,
+      ytDefaultLicense: preset.license === 'creativeCommon' ? 'creativeCommon' : 'youtube',
+      ytDefaultEmbeddable: preset.embeddable !== false,
+      ytDefaultPublicStatsViewable: preset.publicStatsViewable !== false,
     }));
+    onYouTubeSettingsSync({
+      defaults: {
+        ...settings,
+        ytDefaultTitle: preset.title,
+        ytDefaultDescription: preset.description,
+        ytDefaultPrivacy: preset.privacy,
+        ytDefaultCategoryId: preset.categoryId || '22',
+        ytDefaultTags: preset.tags || '',
+        ytDefaultLanguage: preset.defaultLanguage || 'en',
+        ytDefaultMadeForKids: Boolean(preset.madeForKids),
+        ytDefaultNotifySubscribers: preset.notifySubscribers !== false,
+        ytDefaultLicense: preset.license === 'creativeCommon' ? 'creativeCommon' : 'youtube',
+        ytDefaultEmbeddable: preset.embeddable !== false,
+        ytDefaultPublicStatsViewable: preset.publicStatsViewable !== false,
+      },
+      presets: ytQuickPresets,
+    });
   };
 
   const handleDeleteYtQuickPreset = async () => {
@@ -1763,6 +2300,86 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
     setYtQuickPresets(nextPresets);
     setSelectedYtPresetName('');
     await window.electronAPI.saveSettings({ ...settings, ytQuickPresets: nextPresets });
+    onYouTubeSettingsSync({ defaults: settings, presets: nextPresets });
+  };
+
+  const handleSaveOnlineYtPresets = async () => {
+    if (!isLoggedIn) return;
+    setYtOnlineSyncBusy(true);
+    setYtOnlineSyncStatus('Saving online presets...');
+    try {
+      const result = await window.electronAPI.saveYouTubeOnlinePresets({
+        defaults: {
+          ytDefaultTitle: settings.ytDefaultTitle || '',
+          ytDefaultDescription: settings.ytDefaultDescription || '',
+          ytDefaultPrivacy: settings.ytDefaultPrivacy || 'private',
+          ytDefaultCategoryId: settings.ytDefaultCategoryId || '22',
+          ytDefaultTags: settings.ytDefaultTags || '',
+          ytDefaultLanguage: settings.ytDefaultLanguage || 'en',
+          ytDefaultMadeForKids: Boolean(settings.ytDefaultMadeForKids),
+          ytDefaultNotifySubscribers: settings.ytDefaultNotifySubscribers !== false,
+          ytDefaultLicense: settings.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube',
+          ytDefaultEmbeddable: settings.ytDefaultEmbeddable !== false,
+          ytDefaultPublicStatsViewable: settings.ytDefaultPublicStatsViewable !== false,
+        },
+        presets: ytQuickPresets,
+      });
+      setYtOnlineSyncStatus(result.success
+        ? `Online presets saved${result.updatedAt ? ` (${new Date(result.updatedAt).toLocaleString()})` : ''}.`
+        : `Save failed: ${result.error || 'Unknown error'}`);
+    } catch {
+      setYtOnlineSyncStatus('Save failed: unable to reach online preset service.');
+    } finally {
+      setYtOnlineSyncBusy(false);
+    }
+  };
+
+  const handleLoadOnlineYtPresets = async () => {
+    if (!isLoggedIn) return;
+    setYtOnlineSyncBusy(true);
+    setYtOnlineSyncStatus('Loading online presets...');
+    try {
+      const result = await window.electronAPI.loadYouTubeOnlinePresets();
+      if (!result.success) {
+        setYtOnlineSyncStatus(`Load failed: ${result.error || 'Unknown error'}`);
+        return;
+      }
+
+      const onlineDefaults = result.defaults || {};
+      const nextSettings = {
+        ...settings,
+        ytDefaultTitle: onlineDefaults.ytDefaultTitle || settings.ytDefaultTitle || '',
+        ytDefaultDescription: onlineDefaults.ytDefaultDescription || settings.ytDefaultDescription || '',
+        ytDefaultPrivacy: onlineDefaults.ytDefaultPrivacy || settings.ytDefaultPrivacy || 'private',
+        ytDefaultCategoryId: onlineDefaults.ytDefaultCategoryId || settings.ytDefaultCategoryId || '22',
+        ytDefaultTags: onlineDefaults.ytDefaultTags || settings.ytDefaultTags || '',
+        ytDefaultLanguage: onlineDefaults.ytDefaultLanguage || settings.ytDefaultLanguage || 'en',
+        ytDefaultMadeForKids: onlineDefaults.ytDefaultMadeForKids ?? settings.ytDefaultMadeForKids ?? false,
+        ytDefaultNotifySubscribers: onlineDefaults.ytDefaultNotifySubscribers ?? settings.ytDefaultNotifySubscribers ?? true,
+        ytDefaultLicense: onlineDefaults.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : (settings.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube'),
+        ytDefaultEmbeddable: onlineDefaults.ytDefaultEmbeddable ?? settings.ytDefaultEmbeddable ?? true,
+        ytDefaultPublicStatsViewable: onlineDefaults.ytDefaultPublicStatsViewable ?? settings.ytDefaultPublicStatsViewable ?? true,
+      };
+      setSettings((prev: any) => ({
+        ...prev,
+        ...nextSettings,
+      }));
+
+      const onlinePresets = Array.isArray(result.presets)
+        ? result.presets.map(sanitizeYtPreset).filter(Boolean) as YouTubeQuickPreset[]
+        : [];
+      setYtQuickPresets(onlinePresets);
+      setSelectedYtPresetName('');
+      await window.electronAPI.saveSettings({ ...nextSettings, ytQuickPresets: onlinePresets });
+      onYouTubeSettingsSync({ defaults: nextSettings, presets: onlinePresets });
+      setYtOnlineSyncStatus(result.updatedAt
+        ? `Online presets loaded (last updated ${new Date(result.updatedAt).toLocaleString()}).`
+        : 'Online presets loaded.');
+    } catch {
+      setYtOnlineSyncStatus('Load failed: unable to reach online preset service.');
+    } finally {
+      setYtOnlineSyncBusy(false);
+    }
   };
 
   const tabs = [
@@ -1801,13 +2418,14 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
               Theme
               <select
                 className="std-select"
-                value={settings.appTheme || 'olive-dark'}
+                value={appTheme}
                 onChange={e => {
                   const nextTheme = e.target.value as AppTheme;
-                  setSettings({ ...settings, appTheme: nextTheme });
+                  setSettings((prev: any) => ({ ...prev, appTheme: nextTheme }));
                   onThemeChange(nextTheme);
                 }}
               >
+                <option value="classic">Classic</option>
                 <option value="olive-dark">Olive Dark</option>
                 <option value="midnight-blue">Midnight Blue</option>
                 <option value="sand-light">Sand Light</option>
@@ -1885,6 +2503,97 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                     />
                   </label>
 
+                  <div className="yt-inline-row">
+                    <label>
+                      Default Category
+                      <select
+                        className="std-select"
+                        value={settings.ytDefaultCategoryId || '22'}
+                        onChange={e => setSettings({ ...settings, ytDefaultCategoryId: e.target.value })}
+                      >
+                        <option value="22">People & Blogs</option>
+                        <option value="24">Entertainment</option>
+                        <option value="20">Gaming</option>
+                        <option value="10">Music</option>
+                        <option value="27">Education</option>
+                        <option value="28">Science & Technology</option>
+                      </select>
+                    </label>
+                    <label>
+                      Default Language
+                      <input
+                        type="text"
+                        value={settings.ytDefaultLanguage || 'en'}
+                        onChange={e => setSettings({ ...settings, ytDefaultLanguage: e.target.value })}
+                        className="yt-input"
+                        placeholder="en"
+                      />
+                    </label>
+                  </div>
+
+                  <label>
+                    Default Tags (comma separated)
+                    <input
+                      type="text"
+                      value={settings.ytDefaultTags || ''}
+                      onChange={e => setSettings({ ...settings, ytDefaultTags: e.target.value })}
+                      className="yt-input"
+                      placeholder="merge, highlights, weekly"
+                    />
+                  </label>
+
+                  <div className="yt-inline-row">
+                    <label>
+                      Default License
+                      <select
+                        className="std-select"
+                        value={settings.ytDefaultLicense || 'youtube'}
+                        onChange={e => setSettings({ ...settings, ytDefaultLicense: e.target.value })}
+                      >
+                        <option value="youtube">Standard YouTube License</option>
+                        <option value="creativeCommon">Creative Commons</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                    <label className="yt-toggle">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(settings.ytDefaultMadeForKids)}
+                        onChange={e => setSettings({ ...settings, ytDefaultMadeForKids: e.target.checked })}
+                      />
+                      Made for kids
+                    </label>
+                    <label className="yt-toggle">
+                      <input
+                        type="checkbox"
+                        checked={settings.ytDefaultNotifySubscribers !== false}
+                        onChange={e => setSettings({ ...settings, ytDefaultNotifySubscribers: e.target.checked })}
+                      />
+                      Notify subscribers
+                    </label>
+                  </div>
+
+                  <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                    <label className="yt-toggle">
+                      <input
+                        type="checkbox"
+                        checked={settings.ytDefaultEmbeddable !== false}
+                        onChange={e => setSettings({ ...settings, ytDefaultEmbeddable: e.target.checked })}
+                      />
+                      Allow embedding
+                    </label>
+                    <label className="yt-toggle">
+                      <input
+                        type="checkbox"
+                        checked={settings.ytDefaultPublicStatsViewable !== false}
+                        onChange={e => setSettings({ ...settings, ytDefaultPublicStatsViewable: e.target.checked })}
+                      />
+                      Public stats visible
+                    </label>
+                  </div>
+
                   <div className="yt-preset-row">
                     <label>
                       Preset Name
@@ -1920,6 +2629,20 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                       <button className="btn btn-ghost" type="button" onClick={handleDeleteYtQuickPreset}>Delete</button>
                     </div>
                   </div>
+
+                  <div className="yt-preset-actions" style={{ marginTop: 6 }}>
+                    <button className="btn btn-secondary" type="button" onClick={handleSaveOnlineYtPresets} disabled={ytOnlineSyncBusy}>
+                      Save Online Presets
+                    </button>
+                    <button className="btn btn-ghost" type="button" onClick={handleLoadOnlineYtPresets} disabled={ytOnlineSyncBusy}>
+                      Load Online Presets
+                    </button>
+                  </div>
+                  {ytOnlineSyncStatus && (
+                    <p className="panel-subtitle" style={{ marginTop: 8, marginBottom: 0 }}>
+                      {ytOnlineSyncStatus}
+                    </p>
+                  )}
                 </div>
 
                 <button className="btn btn-primary" onClick={handleSave} disabled={isSaving} style={{ marginTop: 16 }}>
