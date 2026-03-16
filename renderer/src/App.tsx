@@ -299,6 +299,25 @@ const App: React.FC = () => {
   const [showDashboard, setShowDashboard] = useState<boolean>(false);
   const [dashboardInitialTab, setDashboardInitialTab] = useState<'general' | 'youtube' | 'ffmpeg' | 'account'>('general');
 
+  const syncFinalizeYouTubeFromSettings = useCallback((payload: {
+    defaults: Record<string, any>;
+    presets: YouTubeQuickPreset[];
+  }) => {
+    const defaults = payload.defaults || {};
+    setYtQuickPresets(Array.isArray(payload.presets) ? payload.presets : []);
+    setYtTitle(String(defaults.ytDefaultTitle || ''));
+    setYtDescription(String(defaults.ytDefaultDescription || ''));
+    setYtPrivacy(String(defaults.ytDefaultPrivacy || 'private'));
+    setYtCategoryId(String(defaults.ytDefaultCategoryId || '22'));
+    setYtTags(String(defaults.ytDefaultTags || ''));
+    setYtDefaultLanguage(String(defaults.ytDefaultLanguage || 'en'));
+    setYtMadeForKids(Boolean(defaults.ytDefaultMadeForKids));
+    setYtNotifySubscribers(defaults.ytDefaultNotifySubscribers !== false);
+    setYtLicense(defaults.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube');
+    setYtEmbeddable(defaults.ytDefaultEmbeddable !== false);
+    setYtPublicStatsViewable(defaults.ytDefaultPublicStatsViewable !== false);
+  }, []);
+
   useEffect(() => {
     checkFFmpeg();
     checkAuthStatus();
@@ -1300,6 +1319,7 @@ const App: React.FC = () => {
               onStandardizationChange={setStandardization}
               onThemeChange={setAppTheme}
               onDefaultOutputDirChange={setDefaultOutputDir}
+              onYouTubeSettingsSync={syncFinalizeYouTubeFromSettings}
               onLogout={handleLogout}
               onLogin={handleGoogleLoginFromDashboard}
             />
@@ -1871,22 +1891,22 @@ const App: React.FC = () => {
                               </label>
                             </div>
 
-                            <div className="yt-preset-actions" style={{ marginTop: 2 }}>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                              <label className="yt-toggle">
                                 <input type="checkbox" checked={ytMadeForKids} onChange={e => setYtMadeForKids(e.target.checked)} />
                                 Made for kids
                               </label>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <label className="yt-toggle">
                                 <input type="checkbox" checked={ytNotifySubscribers} onChange={e => setYtNotifySubscribers(e.target.checked)} />
                                 Notify subscribers
                               </label>
                             </div>
-                            <div className="yt-preset-actions" style={{ marginTop: 2 }}>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                              <label className="yt-toggle">
                                 <input type="checkbox" checked={ytEmbeddable} onChange={e => setYtEmbeddable(e.target.checked)} />
                                 Allow embedding
                               </label>
-                              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <label className="yt-toggle">
                                 <input type="checkbox" checked={ytPublicStatsViewable} onChange={e => setYtPublicStatsViewable(e.target.checked)} />
                                 Public stats visible
                               </label>
@@ -1999,6 +2019,10 @@ interface DashboardPanelProps {
   onStandardizationChange: (s: { resolution: string; fps: string }) => void;
   onThemeChange: (theme: AppTheme) => void;
   onDefaultOutputDirChange: (path: string) => void;
+  onYouTubeSettingsSync: (payload: {
+    defaults: Record<string, any>;
+    presets: YouTubeQuickPreset[];
+  }) => void;
   onLogout: () => void;
   onLogin: () => void;
 }
@@ -2034,7 +2058,7 @@ const UserAvatar: React.FC<UserAvatarProps> = ({ user, size }) => {
 
 const DashboardPanel: React.FC<DashboardPanelProps> = ({
   isLoggedIn, googleUser, ffmpegDetails, standardization, initialTab, appTheme, defaultOutputDir,
-  onStandardizationChange, onThemeChange, onDefaultOutputDirChange, onLogout, onLogin
+  onStandardizationChange, onThemeChange, onDefaultOutputDirChange, onYouTubeSettingsSync, onLogout, onLogin
 }) => {
   const [settings, setSettings] = useState<any>({
     appTheme: appTheme,
@@ -2125,6 +2149,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     await window.electronAPI.saveSettings({ ...settings, ytQuickPresets });
+    onYouTubeSettingsSync({ defaults: settings, presets: ytQuickPresets });
     onThemeChange(normalizeAppTheme(settings.appTheme, appTheme));
     onDefaultOutputDirChange(settings.defaultOutputDir || '');
     onStandardizationChange({
@@ -2216,6 +2241,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
     setYtQuickPresets(nextPresets);
     setSelectedYtPresetName(name);
     await window.electronAPI.saveSettings({ ...settings, ytQuickPresets: nextPresets });
+    onYouTubeSettingsSync({ defaults: settings, presets: nextPresets });
   };
 
   const handleLoadYtQuickPreset = () => {
@@ -2235,6 +2261,23 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
       ytDefaultEmbeddable: preset.embeddable !== false,
       ytDefaultPublicStatsViewable: preset.publicStatsViewable !== false,
     }));
+    onYouTubeSettingsSync({
+      defaults: {
+        ...settings,
+        ytDefaultTitle: preset.title,
+        ytDefaultDescription: preset.description,
+        ytDefaultPrivacy: preset.privacy,
+        ytDefaultCategoryId: preset.categoryId || '22',
+        ytDefaultTags: preset.tags || '',
+        ytDefaultLanguage: preset.defaultLanguage || 'en',
+        ytDefaultMadeForKids: Boolean(preset.madeForKids),
+        ytDefaultNotifySubscribers: preset.notifySubscribers !== false,
+        ytDefaultLicense: preset.license === 'creativeCommon' ? 'creativeCommon' : 'youtube',
+        ytDefaultEmbeddable: preset.embeddable !== false,
+        ytDefaultPublicStatsViewable: preset.publicStatsViewable !== false,
+      },
+      presets: ytQuickPresets,
+    });
   };
 
   const handleDeleteYtQuickPreset = async () => {
@@ -2243,6 +2286,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
     setYtQuickPresets(nextPresets);
     setSelectedYtPresetName('');
     await window.electronAPI.saveSettings({ ...settings, ytQuickPresets: nextPresets });
+    onYouTubeSettingsSync({ defaults: settings, presets: nextPresets });
   };
 
   const handleSaveOnlineYtPresets = async () => {
@@ -2288,19 +2332,23 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
       }
 
       const onlineDefaults = result.defaults || {};
+      const nextSettings = {
+        ...settings,
+        ytDefaultTitle: onlineDefaults.ytDefaultTitle || settings.ytDefaultTitle || '',
+        ytDefaultDescription: onlineDefaults.ytDefaultDescription || settings.ytDefaultDescription || '',
+        ytDefaultPrivacy: onlineDefaults.ytDefaultPrivacy || settings.ytDefaultPrivacy || 'private',
+        ytDefaultCategoryId: onlineDefaults.ytDefaultCategoryId || settings.ytDefaultCategoryId || '22',
+        ytDefaultTags: onlineDefaults.ytDefaultTags || settings.ytDefaultTags || '',
+        ytDefaultLanguage: onlineDefaults.ytDefaultLanguage || settings.ytDefaultLanguage || 'en',
+        ytDefaultMadeForKids: onlineDefaults.ytDefaultMadeForKids ?? settings.ytDefaultMadeForKids ?? false,
+        ytDefaultNotifySubscribers: onlineDefaults.ytDefaultNotifySubscribers ?? settings.ytDefaultNotifySubscribers ?? true,
+        ytDefaultLicense: onlineDefaults.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : (settings.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube'),
+        ytDefaultEmbeddable: onlineDefaults.ytDefaultEmbeddable ?? settings.ytDefaultEmbeddable ?? true,
+        ytDefaultPublicStatsViewable: onlineDefaults.ytDefaultPublicStatsViewable ?? settings.ytDefaultPublicStatsViewable ?? true,
+      };
       setSettings((prev: any) => ({
         ...prev,
-        ytDefaultTitle: onlineDefaults.ytDefaultTitle || prev.ytDefaultTitle || '',
-        ytDefaultDescription: onlineDefaults.ytDefaultDescription || prev.ytDefaultDescription || '',
-        ytDefaultPrivacy: onlineDefaults.ytDefaultPrivacy || prev.ytDefaultPrivacy || 'private',
-        ytDefaultCategoryId: onlineDefaults.ytDefaultCategoryId || prev.ytDefaultCategoryId || '22',
-        ytDefaultTags: onlineDefaults.ytDefaultTags || prev.ytDefaultTags || '',
-        ytDefaultLanguage: onlineDefaults.ytDefaultLanguage || prev.ytDefaultLanguage || 'en',
-        ytDefaultMadeForKids: onlineDefaults.ytDefaultMadeForKids ?? prev.ytDefaultMadeForKids ?? false,
-        ytDefaultNotifySubscribers: onlineDefaults.ytDefaultNotifySubscribers ?? prev.ytDefaultNotifySubscribers ?? true,
-        ytDefaultLicense: onlineDefaults.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : (prev.ytDefaultLicense === 'creativeCommon' ? 'creativeCommon' : 'youtube'),
-        ytDefaultEmbeddable: onlineDefaults.ytDefaultEmbeddable ?? prev.ytDefaultEmbeddable ?? true,
-        ytDefaultPublicStatsViewable: onlineDefaults.ytDefaultPublicStatsViewable ?? prev.ytDefaultPublicStatsViewable ?? true,
+        ...nextSettings,
       }));
 
       const onlinePresets = Array.isArray(result.presets)
@@ -2308,6 +2356,8 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
         : [];
       setYtQuickPresets(onlinePresets);
       setSelectedYtPresetName('');
+      await window.electronAPI.saveSettings({ ...nextSettings, ytQuickPresets: onlinePresets });
+      onYouTubeSettingsSync({ defaults: nextSettings, presets: onlinePresets });
       setYtOnlineSyncStatus(result.updatedAt
         ? `Online presets loaded (last updated ${new Date(result.updatedAt).toLocaleString()}).`
         : 'Online presets loaded.');
@@ -2490,8 +2540,8 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                     </label>
                   </div>
 
-                  <div className="yt-preset-actions" style={{ marginTop: 2 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                    <label className="yt-toggle">
                       <input
                         type="checkbox"
                         checked={Boolean(settings.ytDefaultMadeForKids)}
@@ -2499,7 +2549,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                       />
                       Made for kids
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <label className="yt-toggle">
                       <input
                         type="checkbox"
                         checked={settings.ytDefaultNotifySubscribers !== false}
@@ -2509,8 +2559,8 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                     </label>
                   </div>
 
-                  <div className="yt-preset-actions" style={{ marginTop: 2 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="yt-toggle-row" style={{ marginTop: 2 }}>
+                    <label className="yt-toggle">
                       <input
                         type="checkbox"
                         checked={settings.ytDefaultEmbeddable !== false}
@@ -2518,7 +2568,7 @@ const DashboardPanel: React.FC<DashboardPanelProps> = ({
                       />
                       Allow embedding
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <label className="yt-toggle">
                       <input
                         type="checkbox"
                         checked={settings.ytDefaultPublicStatsViewable !== false}
