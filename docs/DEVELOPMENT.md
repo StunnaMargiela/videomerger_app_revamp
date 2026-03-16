@@ -11,14 +11,14 @@
    ```git reset
    
 
-2. **Install Node.js & npm** (required for Desktop App development)
-   - **Windows**: Download the LTS version from [nodejs.org](htgit statps://nodejs.org/) and install it.
-   - **macOS**: `brew install node`
-   - **Ubuntu/Debian**: `sudo apt-get install nodejs npm`
+2. **Install Node.js 18+ & npm 9+** (required for Desktop App development)
+    - **Windows**: Download the LTS version from [nodejs.org](https://nodejs.org/) and install it.
+    - **macOS**: `brew install node`
+    - **Ubuntu/Debian**: `sudo apt-get install nodejs npm`
    
-   *(Verify installation by running `node -v` and `npm -v` in your terminal)*
+    *(Verify installation: `node -v` should report 18.x or newer; `npm -v` 9.x or newer)*
 
-3. **Set up Python virtual environment**
+3. **Set up Python 3.8+ virtual environment**
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -392,15 +392,13 @@ npm run test        # Run vitest
 npm run build       # Production build
 ```
 
-### 4-Step Wizard
+### 3-Step Wizard
 
 | Step | Name | Description |
 |------|------|-------------|
-| 0 | Auth | Google sign-in or skip |
 | 1 | Add Videos | Drag-and-drop or browse; set resolution/FPS |
-| 2 | Arrange | Sort, duplicate, drag-and-drop reorder |
-| 3 | Preview | Review all settings before merge |
-| 4 | Finalize | Choose output path, start merge, track progress |
+| 2 | Arrange & Preview | Sort, duplicate, drag-and-drop reorder, and review settings before merge |
+| 3 | Finalize & Merge | Choose output path, start merge, and track progress |
 
 ### Drag-and-Drop (Step 1)
 
@@ -422,19 +420,22 @@ The header shows an FFmpeg status chip with a colored dot:
 
 Click the chip to open a dialog showing version, path, and whether it's bundled or from system PATH.
 
-### Arrange Screen Enhancements (Step 2)
+### Arrange & Preview (Step 2)
 
 - **Sorting**: Sort by Name (ascending/descending) via toolbar
 - **Duplicate**: Click "Dup" to clone a video entry in the sequence
 - **Drag-and-drop reorder**: Drag items by the handle (⠿) to rearrange
 - **Up/Down/Remove**: Standard reorder and removal buttons
 
-### Preview Step (Step 3)
-
-Shows a summary of:
+Also shows a summary of:
 - Ordered file list
 - Selected standardization settings
 - Auth status and YouTube availability
+
+### Finalize & Merge (Step 3)
+
+- Choose output path
+- Start merge and monitor progress
 
 ### YouTube Upload
 
