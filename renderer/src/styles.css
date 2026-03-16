@@ -1127,6 +1127,69 @@ body {
   gap: 8px;
 }
 
+.yt-toggle-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.yt-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--olive-200);
+  font-size: 0.86rem;
+  user-select: none;
+  cursor: pointer;
+  min-height: 22px;
+  line-height: 1.1;
+}
+
+.yt-config .yt-toggle {
+  flex-direction: row;
+  align-items: center;
+}
+
+.yt-toggle input[type="checkbox"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(var(--accent-rgb), 0.55);
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.yt-toggle input[type="checkbox"]::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--blue-400);
+  transform: scale(0);
+  transition: transform 0.16s ease;
+}
+
+.yt-toggle input[type="checkbox"]:checked {
+  border-color: var(--blue-400);
+  background: rgba(var(--accent-rgb), 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16);
+}
+
+.yt-toggle input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+
+.yt-toggle input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.26);
+}
+
 .yt-config label {
   display: flex;
   flex-direction: column;
@@ -1436,6 +1499,12 @@ body {
   .yt-preset-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .yt-toggle-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .success-actions {

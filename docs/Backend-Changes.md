@@ -93,3 +93,13 @@
 	- Added account-scoped storage map in Electron Store (`youtubeOnlinePresetsByUser`) keyed by normalized user email.
 	- Added preload bridge exposure for save/load methods.
 - Reason: establish stable IPC/data contract now so storage backend can later be swapped to Firebase with minimal UI changes.
+
+### Preset Sync Verification Note
+- Verified that current `youtube-online-presets-save/load` handlers are authenticated by Google login state and user email.
+- Verified current persistence target is still local Electron Store (`youtubeOnlinePresetsByUser`) in main process.
+- Result: feature currently behaves as account-scoped local persistence (pre-Firebase), not remote Firebase storage yet.
+
+### YouTube Checkbox Visual Polish
+- Scope: circular minimalist checkbox styling update in renderer YouTube forms.
+- Backend impact: None.
+- Reason: visual and layout changes are CSS/renderer-only with no IPC or service behavior changes.
